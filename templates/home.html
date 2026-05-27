@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}GenNet — Federated Network · Global Map{% endblock %}
+
+{% block extra_css %}
+.hero{padding:14px 0 36px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:3px;text-transform:uppercase;color:var(--teal);margin-bottom:18px}
+
+.map-shell{background:var(--paper2);border:1px solid var(--line);border-radius:18px;padding:36px 28px;margin:32px 0}
+.map-stats{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:28px;flex-wrap:wrap;gap:14px}
+.map-counter{font-family:var(--display);font-size:56px;line-height:1;font-weight:600;color:var(--ink)}
+.map-label{font-size:13px;color:var(--ink3);margin-top:4px}
+.live-dot{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:12px;color:var(--green-soft)}
+.live-dot::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--green-soft);box-shadow:0 0 6px var(--green-soft);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+.topology{position:relative;min-height:340px;padding:24px 0}
+.coord-node{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:linear-gradient(135deg,var(--teal),var(--teal-deep));color:#fff;border-radius:14px;padding:18px 26px;text-align:center;z-index:3;box-shadow:0 8px 24px rgba(15,122,90,0.25);min-width:200px}
+.coord-node .ttl{font-family:var(--display);font-weight:600;font-size:18px}
+.coord-node .sub{font-size:11px;font-family:var(--mono);opacity:.85;margin-top:4px}
+
+.hosp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-top:230px}
+.hosp-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;border-left:3px solid var(--teal);transition:transform .18s}
+.hosp-card:hover{transform:translateY(-2px)}
+.hosp-name{font-weight:600;font-size:14px;color:var(--ink)}
+.hosp-doctor{font-size:12px;color:var(--ink3);margin-top:3px;font-family:var(--mono)}
+.hosp-city{font-size:11px;color:var(--ink3);margin-top:6px;font-style:italic}
+
+.empty-state{text-align:center;padding:60px 20px;color:var(--ink3);font-size:14px;font-style:italic}
+.empty-state .em-icon{font-family:var(--display);font-size:42px;color:var(--line);margin-bottom:12px}
+
+.cta-row{margin-top:36px;display:flex;gap:14px;flex-wrap:wrap}
+
+.poc-note{background:#fff;border:1px dashed var(--line);border-radius:12px;padding:18px 22px;margin-top:36px;font-size:13px;color:var(--ink3)}
+.poc-note b{color:var(--ink)}
+{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div class="eyebrow">Live federated network · SLC6A1 / DEE-49</div>
+  <h1>The GenNet network, in real time.</h1>
+  <p class="lede">Hospitals join this federated network for rare genetic disease. Each hospital keeps its own patient data behind its own firewall — only aggregate results are exchanged. Below is the live map of every hospital currently in the network.</p>
+</div>
+
+<div class="map-shell">
+  <div class="map-stats">
+    <div>
+      <div class="map-counter">{{ n_approved }}</div>
+      <div class="map-label">{% if n_approved == 1 %}hospital connected{% else %}hospitals connected{% endif %}</div>
+    </div>
+    <div class="live-dot">live · updates automatically</div>
+  </div>
+
+  {% if approved %}
+  <div class="topology">
+    <div class="coord-node">
+      <div class="ttl">Central Coordinator</div>
+      <div class="sub">orchestrates · aggregates · no patient data stored</div>
+    </div>
+    <div class="hosp-grid" id="hosp-grid">
+      {% for h in approved %}
+      <div class="hosp-card">
+        <div class="hosp-name">{{ h.hospital }}</div>
+        <div class="hosp-doctor">Dr. {{ h.doctor }}</div>
+        {% if h.city %}<div class="hosp-city">{{ h.city }}</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="em-icon">○</div>
+    <div>No hospitals have joined yet. Be the first.</div>
+  </div>
+  {% endif %}
+
+  <div class="cta-row">
+    <a href="/join" class="btn">Join the network →</a>
+    <a href="https://gennet-demo.netlify.app/" target="_blank" class="btn btn-ghost">See the simulator</a>
+  </div>
+</div>
+
+<div class="poc-note">
+  <b>About this stage.</b> This is the network's join layer — Phase 1 of GenNet's collaborative mode.
+  Once approved, a doctor will be able to add cases through the Viewer (coming in the next iteration).
+  All data shown is for demonstration purposes — a proof of concept of how federated genomic intelligence
+  can grow one hospital at a time.
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Soft auto-refresh every 20 seconds so new hospitals appear without manual reload
+setTimeout(() => location.reload(), 20000);
+</script>
+{% endblock %}

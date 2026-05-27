@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Join the GenNet network{% endblock %}
+
+{% block extra_css %}
+.join-shell{max-width:560px;margin:0 auto}
+.help{font-size:13px;color:var(--ink3);margin-top:5px}
+.success-card{background:var(--teal-bg);border:1px solid var(--teal);border-radius:14px;padding:28px;text-align:center}
+.success-card h2{margin-top:0;color:var(--teal-deep)}
+.success-card p{margin:0 auto 14px;color:var(--ink2)}
+{% endblock %}
+
+{% block content %}
+<div class="join-shell">
+  <div class="tag">Join request</div>
+  <h1>Join the GenNet network.</h1>
+  <p class="lede">Tell us your name and your hospital. Rafael will review your request and approve it manually — usually within a day. Once approved, your hospital appears on the global map and you can start working in your own node.</p>
+
+  {% if sent == "ok" %}
+  <div class="success-card">
+    <h2>✓ Your request was received</h2>
+    <p>Rafael will review it and get back to you. You'll know it's approved when your hospital appears on the global map.</p>
+    <a href="/" class="btn btn-ghost btn-sm">Back to the network</a>
+  </div>
+  {% elif sent == "error" %}
+  <div class="alert alert-error">Please fill in at least the hospital and doctor name.</div>
+  {% endif %}
+
+  {% if sent != "ok" %}
+  <form method="post" action="/join" class="card" style="background:#fff">
+    <div class="form-row">
+      <label for="hospital">Hospital name</label>
+      <input type="text" name="hospital" id="hospital" required maxlength="120" placeholder="e.g. Hospital Central de Almería">
+      <div class="help">As you'd like it shown on the network map.</div>
+    </div>
+
+    <div class="form-row">
+      <label for="doctor">Your name (Doctor / Researcher)</label>
+      <input type="text" name="doctor" id="doctor" required maxlength="120" placeholder="e.g. Dr. María García">
+    </div>
+
+    <div class="form-row">
+      <label for="city">City <span style="font-weight:400;color:var(--ink3)">(optional)</span></label>
+      <input type="text" name="city" id="city" maxlength="80" placeholder="e.g. Almería, Spain">
+    </div>
+
+    <div class="form-row">
+      <label for="email">Contact email <span style="font-weight:400;color:var(--ink3)">(optional, kept private)</span></label>
+      <input type="email" name="email" id="email" maxlength="120" placeholder="you@hospital.org">
+      <div class="help">Used only so Rafael can contact you about the approval. Not shown publicly.</div>
+    </div>
+
+    <button type="submit" class="btn">Submit request →</button>
+  </form>
+  {% endif %}
+
+  <div class="poc-note" style="background:var(--paper2);border:1px solid var(--line);border-radius:12px;padding:18px 22px;margin-top:24px;font-size:13px;color:var(--ink3)">
+    <b style="color:var(--ink)">A note on data.</b> GenNet is a proof of concept. Please use synthetic
+    or anonymized data only — never real patient identifiers. The point is to demonstrate the
+    federated workflow, not to process actual medical records.
+  </div>
+</div>
+{% endblock %}

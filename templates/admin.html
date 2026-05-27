@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}Admin panel · GenNet{% endblock %}
+
+{% block extra_css %}
+.admin-grid{display:grid;grid-template-columns:1fr;gap:20px}
+.req-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+.req-card.pending{border-left:4px solid var(--amber)}
+.req-card.approved{border-left:4px solid var(--green-soft)}
+.req-card.rejected{border-left:4px solid var(--ink3);opacity:.7}
+.req-info{flex:1;min-width:220px}
+.req-hosp{font-weight:600;font-size:15px;color:var(--ink)}
+.req-meta{font-size:13px;color:var(--ink3);margin-top:4px;font-family:var(--mono)}
+.req-when{font-size:11px;color:var(--ink3);margin-top:4px}
+.req-actions{display:flex;gap:8px;flex-wrap:wrap}
+.section-head{display:flex;justify-content:space-between;align-items:baseline;margin:32px 0 14px}
+.section-head h2{margin:0}
+.count-pill{background:var(--paper2);border:1px solid var(--line);border-radius:18px;padding:3px 12px;font-size:12px;font-family:var(--mono);color:var(--ink2)}
+.empty-line{font-style:italic;color:var(--ink3);font-size:13px;padding:14px 0}
+{% endblock %}
+
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:14px">
+  <div>
+    <div class="tag">Administrator panel</div>
+    <h1>Network admin</h1>
+  </div>
+  <a href="/admin/logout" class="btn btn-ghost btn-sm">Sign out</a>
+</div>
+
+<p class="lede">Review join requests, approve hospitals into the network, and manage who's in.</p>
+
+<div class="section-head">
+  <h2>Pending requests</h2>
+  <span class="count-pill">{{ pending|length }} waiting</span>
+</div>
+
+{% if pending %}
+<div class="admin-grid">
+  {% for r in pending %}
+  <div class="req-card pending">
+    <div class="req-info">
+      <div class="req-hosp">{{ r.hospital }}</div>
+      <div class="req-meta">Dr. {{ r.doctor }}{% if r.city %} · {{ r.city }}{% endif %}{% if r.email %} · {{ r.email }}{% endif %}</div>
+      <div class="req-when">requested {{ r.requested_at }}</div>
+    </div>
+    <div class="req-actions">
+      <form method="post" action="/admin/approve/{{ r.id }}" style="display:inline">
+        <button type="submit" class="btn btn-sm">✓ Approve</button>
+      </form>
+      <form method="post" action="/admin/reject/{{ r.id }}" style="display:inline">
+        <button type="submit" class="btn btn-ghost btn-sm">Reject</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-line">No pending requests right now.</div>
+{% endif %}
+
+<div class="section-head">
+  <h2>In the network</h2>
+  <span class="count-pill">{{ approved|length }} active</span>
+</div>
+
+{% if approved %}
+<div class="admin-grid">
+  {% for r in approved %}
+  <div class="req-card approved">
+    <div class="req-info">
+      <div class="req-hosp">{{ r.hospital }}</div>
+      <div class="req-meta">Dr. {{ r.doctor }}{% if r.city %} · {{ r.city }}{% endif %}{% if r.email %} · {{ r.email }}{% endif %}</div>
+      <div class="req-when">approved {{ r.approved_at }} · code <span class="code-pill">{{ r.personal_code }}</span></div>
+    </div>
+    <div class="req-actions">
+      <form method="post" action="/admin/remove/{{ r.id }}" style="display:inline" onsubmit="return confirm('Remove this hospital from the network?')">
+        <button type="submit" class="btn btn-ghost btn-sm">Remove</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-line">No hospitals in the network yet.</div>
+{% endif %}
+
+{% if rejected %}
+<div class="section-head">
+  <h2>Rejected</h2>
+  <span class="count-pill">{{ rejected|length }}</span>
+</div>
+<div class="admin-grid">
+  {% for r in rejected %}
+  <div class="req-card rejected">
+    <div class="req-info">
+      <div class="req-hosp">{{ r.hospital }}</div>
+      <div class="req-meta">Dr. {{ r.doctor }}{% if r.city %} · {{ r.city }}{% endif %}</div>
+      <div class="req-when">rejected {{ r.rejected_at }}</div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div style="margin-top:48px;padding-top:22px;border-top:1px solid var(--line);font-size:12px;color:var(--ink3);font-family:var(--mono)">
+  GenNet Admin · personal codes are shown above so you can share them with each approved doctor by email.
+</div>
+{% endblock %}
