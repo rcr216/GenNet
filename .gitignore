@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.venv/
+venv/
+env/
+.env
+*.tmp
+gennet_state.json
+.DS_Store
+.idea/
+.vscode/
