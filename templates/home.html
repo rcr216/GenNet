@@ -6,30 +6,73 @@
 .hero{padding:14px 0 36px}
 .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:3px;text-transform:uppercase;color:var(--teal);margin-bottom:18px}
 
-.map-shell{background:var(--paper2);border:1px solid var(--line);border-radius:18px;padding:36px 28px;margin:32px 0}
-.map-stats{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:28px;flex-wrap:wrap;gap:14px}
+.map-shell{background:linear-gradient(180deg,var(--paper2) 0%,#e8e5d8 100%);border:1px solid var(--line);border-radius:18px;padding:32px 28px;margin:32px 0;position:relative;overflow:hidden}
+.map-shell::before{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:0.5;
+  background-image:radial-gradient(circle at 20% 30%, rgba(15,122,90,0.04) 1px, transparent 1px),radial-gradient(circle at 80% 70%, rgba(15,122,90,0.04) 1px, transparent 1px),radial-gradient(circle at 50% 50%, rgba(15,122,90,0.03) 1px, transparent 1px);
+  background-size:80px 80px,120px 120px,60px 60px;
+}
+.map-stats{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:18px;flex-wrap:wrap;gap:14px;position:relative;z-index:2}
 .map-counter{font-family:var(--display);font-size:56px;line-height:1;font-weight:600;color:var(--ink)}
 .map-label{font-size:13px;color:var(--ink3);margin-top:4px}
 .live-dot{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:12px;color:var(--green-soft)}
 .live-dot::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--green-soft);box-shadow:0 0 6px var(--green-soft);animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
-.topology{position:relative;min-height:340px;padding:24px 0}
-.coord-node{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:linear-gradient(135deg,var(--teal),var(--teal-deep));color:#fff;border-radius:14px;padding:18px 26px;text-align:center;z-index:3;box-shadow:0 8px 24px rgba(15,122,90,0.25);min-width:200px}
-.coord-node .ttl{font-family:var(--display);font-weight:600;font-size:18px}
-.coord-node .sub{font-size:11px;font-family:var(--mono);opacity:.85;margin-top:4px}
+.constellation{
+  position:relative;width:100%;height:500px;
+  display:flex;align-items:center;justify-content:center;
+  z-index:2;
+}
+@media(max-width:680px){.constellation{height:420px}}
 
-.hosp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-top:230px}
-.hosp-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;border-left:3px solid var(--teal);transition:transform .18s}
-.hosp-card:hover{transform:translateY(-2px)}
-.hosp-name{font-weight:600;font-size:14px;color:var(--ink)}
-.hosp-doctor{font-size:12px;color:var(--ink3);margin-top:3px;font-family:var(--mono)}
-.hosp-city{font-size:11px;color:var(--ink3);margin-top:6px;font-style:italic}
+.coord-star{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:120px;height:120px;border-radius:50%;
+  background:radial-gradient(circle at 30% 30%, #1a9b75 0%, var(--teal) 45%, var(--teal-deep) 100%);
+  display:flex;align-items:center;justify-content:center;flex-direction:column;
+  color:#fff;text-align:center;z-index:5;
+  box-shadow:0 0 0 8px rgba(15,122,90,0.12), 0 0 0 18px rgba(15,122,90,0.06), 0 12px 36px rgba(15,122,90,0.35);
+  animation:breathe 4s ease-in-out infinite;
+}
+@keyframes breathe{0%,100%{box-shadow:0 0 0 8px rgba(15,122,90,0.12), 0 0 0 18px rgba(15,122,90,0.06), 0 12px 36px rgba(15,122,90,0.35)}50%{box-shadow:0 0 0 10px rgba(15,122,90,0.18), 0 0 0 24px rgba(15,122,90,0.08), 0 14px 40px rgba(15,122,90,0.4)}}
+.coord-star .ttl{font-family:var(--display);font-weight:600;font-size:14px;line-height:1.15;padding:0 8px}
+.coord-star .sub{font-size:9px;font-family:var(--mono);opacity:.85;margin-top:5px;letter-spacing:1px;text-transform:uppercase}
 
-.empty-state{text-align:center;padding:60px 20px;color:var(--ink3);font-size:14px;font-style:italic}
+.hosp-star{
+  position:absolute;
+  display:flex;flex-direction:column;align-items:center;
+  transform:translate(-50%,-50%);
+  transition:transform .3s ease, z-index 0s;
+  cursor:default;
+}
+.hosp-star:hover{transform:translate(-50%,-50%) scale(1.4);z-index:10}
+.hosp-dot{
+  width:14px;height:14px;border-radius:50%;
+  background:radial-gradient(circle at 30% 30%, #fff 0%, #c9e8da 60%, var(--teal) 100%);
+  box-shadow:0 0 0 3px rgba(15,122,90,0.08), 0 0 12px rgba(15,122,90,0.25);
+  transition:all .25s;
+}
+.hosp-star:hover .hosp-dot{
+  background:radial-gradient(circle at 30% 30%, #fff 0%, #aedcca 60%, var(--teal-deep) 100%);
+  box-shadow:0 0 0 5px rgba(15,122,90,0.15), 0 0 20px rgba(15,122,90,0.45);
+}
+.hosp-name{
+  margin-top:7px;font-size:10.5px;font-weight:600;color:var(--ink2);
+  font-family:var(--sans);text-align:center;max-width:110px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  background:rgba(247,245,239,0.7);padding:2px 6px;border-radius:4px;
+  transition:all .25s;
+}
+.hosp-star:hover .hosp-name{
+  background:var(--teal);color:#fff;overflow:visible;white-space:normal;
+  max-width:180px;font-size:11px;
+}
+
+.empty-state{text-align:center;padding:60px 20px;color:var(--ink3);font-size:14px;font-style:italic;position:relative;z-index:2}
 .empty-state .em-icon{font-family:var(--display);font-size:42px;color:var(--line);margin-bottom:12px}
 
-.cta-row{margin-top:36px;display:flex;gap:14px;flex-wrap:wrap}
+.cta-row{margin-top:24px;display:flex;gap:14px;flex-wrap:wrap;position:relative;z-index:2}
 
 .poc-note{background:#fff;border:1px dashed var(--line);border-radius:12px;padding:18px 22px;margin-top:36px;font-size:13px;color:var(--ink3)}
 .poc-note b{color:var(--ink)}
@@ -52,20 +95,17 @@
   </div>
 
   {% if approved %}
-  <div class="topology">
-    <div class="coord-node">
-      <div class="ttl">Central Coordinator</div>
-      <div class="sub">orchestrates · aggregates · no patient data stored</div>
+  <div class="constellation" id="constellation">
+    <div class="coord-star">
+      <div class="ttl">Central<br>Coordinator</div>
+      <div class="sub">GenNet</div>
     </div>
-    <div class="hosp-grid" id="hosp-grid">
-      {% for h in approved %}
-      <div class="hosp-card">
-        <div class="hosp-name">{{ h.hospital }}</div>
-        <div class="hosp-doctor">Dr. {{ h.doctor }}</div>
-        {% if h.city %}<div class="hosp-city">{{ h.city }}</div>{% endif %}
-      </div>
-      {% endfor %}
+    {% for h in approved %}
+    <div class="hosp-star" data-index="{{ loop.index0 }}" title="{{ h.hospital }}{% if h.city %} — {{ h.city }}{% endif %}">
+      <div class="hosp-dot"></div>
+      <div class="hosp-name">{{ h.hospital }}</div>
     </div>
+    {% endfor %}
   </div>
   {% else %}
   <div class="empty-state">
@@ -90,7 +130,44 @@
 
 {% block extra_js %}
 <script>
-// Soft auto-refresh every 20 seconds so new hospitals appear without manual reload
+(function placeStars(){
+  const cont = document.getElementById('constellation');
+  if (!cont) return;
+  const stars = cont.querySelectorAll('.hosp-star');
+  const n = stars.length;
+  if (n === 0) return;
+
+  const rect = cont.getBoundingClientRect();
+  const cx = rect.width / 2;
+  const cy = rect.height / 2;
+
+  const isSmall = rect.width < 600;
+  const ringSpec = isSmall
+    ? [{count: 6, r: 110}, {count: 10, r: 165}, {count: 14, r: 215}, {count: 20, r: 260}]
+    : [{count: 8, r: 160}, {count: 14, r: 235}, {count: 20, r: 305}, {count: 28, r: 370}];
+
+  function jitter(i, amp){
+    const s = Math.sin(i * 12.9898) * 43758.5453;
+    return ((s - Math.floor(s)) - 0.5) * 2 * amp;
+  }
+
+  let idx = 0;
+  for (let ring = 0; ring < ringSpec.length && idx < n; ring++){
+    const spec = ringSpec[ring];
+    const inThisRing = Math.min(spec.count, n - idx);
+    const startAngle = ring * 0.37 + 0.3;
+    for (let k = 0; k < inThisRing; k++, idx++){
+      const angle = startAngle + (k / spec.count) * Math.PI * 2;
+      const r = spec.r + jitter(idx, 14);
+      const aJitter = jitter(idx + 100, 0.08);
+      const x = cx + Math.cos(angle + aJitter) * r;
+      const y = cy + Math.sin(angle + aJitter) * r;
+      stars[idx].style.left = x + 'px';
+      stars[idx].style.top  = y + 'px';
+    }
+  }
+})();
+
 setTimeout(() => location.reload(), 20000);
 </script>
 {% endblock %}
