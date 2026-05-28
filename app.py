@@ -20,6 +20,7 @@ For production, swap for PostgreSQL — same logic.
 import os
 import json
 import secrets
+import hashlib
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -75,6 +76,20 @@ def make_personal_code() -> str:
     """Generate a code like HOSP-A7K9 for a newly approved hospital."""
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no confusing chars
     return "HOSP-" + "".join(secrets.choice(alphabet) for _ in range(4))
+
+
+def hash_password(password: str, salt: str) -> str:
+    """Hash a password with a salt. We never store plaintext passwords."""
+    return hashlib.sha256((salt + ":" + password).encode("utf-8")).hexdigest()
+
+
+def find_hospital_by_code(state: dict, code: str) -> Optional[dict]:
+    code = (code or "").strip().upper()
+    return next((h for h in state["approved"] if h.get("personal_code", "").upper() == code), None)
+
+
+def find_hospital_by_id(state: dict, hid: str) -> Optional[dict]:
+    return next((h for h in state["approved"] if h.get("id") == hid), None)
 
 
 # ── App setup ──────────────────────────────────────────────────────────────
@@ -204,6 +219,8 @@ async def admin_approve(req_id: str, request: Request):
     state["pending"] = [x for x in state["pending"] if x["id"] != req_id]
     item["approved_at"] = now_iso()
     item["personal_code"] = make_personal_code()
+    item["password_hash"] = None   # set by the doctor on first activation
+    item["activated"] = False
     state["approved"].append(item)
     save_state(state)
     return RedirectResponse(url="/admin", status_code=303)
@@ -236,6 +253,115 @@ async def admin_remove(req_id: str, request: Request):
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# HOSPITAL ACCESS (each doctor enters their own hospital)
+# ─────────────────────────────────────────────────────────────────────────
+HOSPITAL_COOKIE = "gennet_hospital"   # stores the hospital id the doctor is logged into
+
+
+def is_in_hospital(request: Request, hid: str) -> bool:
+    """Check the doctor has a valid session cookie for THIS hospital."""
+    token = request.cookies.get(HOSPITAL_COOKIE, "")
+    return token == hid
+
+
+@app.get("/hospital/{hid}", response_class=HTMLResponse)
+async def hospital_gate(hid: str, request: Request):
+    """
+    Entry point when someone clicks a hospital on the map.
+    - If not activated yet → show activation page (enter code, create password).
+    - If activated but not logged in → show login page.
+    - If logged in → show the hospital workspace.
+    """
+    state = load_state()
+    h = find_hospital_by_id(state, hid)
+    if h is None:
+        return RedirectResponse(url="/", status_code=303)
+
+    if not h.get("activated"):
+        return templates.TemplateResponse("hospital_activate.html", {
+            "request": request, "hospital": h, "error": None,
+        })
+
+    if is_in_hospital(request, hid):
+        return templates.TemplateResponse("hospital_workspace.html", {
+            "request": request, "hospital": h,
+        })
+
+    return templates.TemplateResponse("hospital_login.html", {
+        "request": request, "hospital": h, "error": None,
+    })
+
+
+@app.post("/hospital/{hid}/activate")
+async def hospital_activate(hid: str, request: Request,
+                            code: str = Form(...), password: str = Form(...),
+                            password2: str = Form(...)):
+    """First-time activation: verify the HOSP-XXXX code and set a password."""
+    state = load_state()
+    h = find_hospital_by_id(state, hid)
+    if h is None:
+        return RedirectResponse(url="/", status_code=303)
+
+    if h.get("activated"):
+        return RedirectResponse(url=f"/hospital/{hid}", status_code=303)
+
+    # Validate the activation code matches THIS hospital
+    if (code or "").strip().upper() != h.get("personal_code", "").upper():
+        return templates.TemplateResponse("hospital_activate.html", {
+            "request": request, "hospital": h,
+            "error": "That activation code doesn't match this hospital.",
+        })
+    if len(password) < 6:
+        return templates.TemplateResponse("hospital_activate.html", {
+            "request": request, "hospital": h,
+            "error": "Password must be at least 6 characters.",
+        })
+    if password != password2:
+        return templates.TemplateResponse("hospital_activate.html", {
+            "request": request, "hospital": h,
+            "error": "The two passwords don't match.",
+        })
+
+    salt = secrets.token_hex(8)
+    h["password_salt"] = salt
+    h["password_hash"] = hash_password(password, salt)
+    h["activated"] = True
+    h["activated_at"] = now_iso()
+    save_state(state)
+
+    resp = RedirectResponse(url=f"/hospital/{hid}", status_code=303)
+    resp.set_cookie(HOSPITAL_COOKIE, hid, max_age=7 * 24 * 3600, httponly=True, samesite="lax")
+    return resp
+
+
+@app.post("/hospital/{hid}/login")
+async def hospital_login(hid: str, request: Request, password: str = Form(...)):
+    state = load_state()
+    h = find_hospital_by_id(state, hid)
+    if h is None:
+        return RedirectResponse(url="/", status_code=303)
+    if not h.get("activated"):
+        return RedirectResponse(url=f"/hospital/{hid}", status_code=303)
+
+    salt = h.get("password_salt", "")
+    if hash_password(password, salt) != h.get("password_hash"):
+        return templates.TemplateResponse("hospital_login.html", {
+            "request": request, "hospital": h, "error": "Incorrect password.",
+        })
+
+    resp = RedirectResponse(url=f"/hospital/{hid}", status_code=303)
+    resp.set_cookie(HOSPITAL_COOKIE, hid, max_age=7 * 24 * 3600, httponly=True, samesite="lax")
+    return resp
+
+
+@app.get("/hospital/{hid}/logout")
+async def hospital_logout(hid: str):
+    resp = RedirectResponse(url="/", status_code=303)
+    resp.delete_cookie(HOSPITAL_COOKIE)
+    return resp
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # JSON API (for the map to refresh live)
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -247,10 +373,12 @@ async def api_hospitals():
         "count": len(state["approved"]),
         "hospitals": [
             {
+                "id": h["id"],
                 "hospital": h["hospital"],
                 "doctor": h["doctor"],
                 "city": h.get("city", ""),
                 "approved_at": h.get("approved_at", ""),
+                "activated": h.get("activated", False),
             }
             for h in state["approved"]
         ],
