@@ -59,6 +59,27 @@ if USE_DB:
                     VALUES (1, %s)
                     ON CONFLICT (id) DO NOTHING
                 """, (Jsonb({"pending": [], "approved": [], "rejected": []}),))
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS gennet_beacon (
+                        id              SERIAL PRIMARY KEY,
+                        hospital_id     TEXT NOT NULL,
+                        patient_local_id TEXT NOT NULL,
+                        variant_cdna    TEXT,
+                        variant_protein TEXT,
+                        effect_type     TEXT,
+                        exon            TEXT,
+                        phenotype_tag   TEXT,
+                        drug_response   TEXT,
+                        submitted_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        UNIQUE (hospital_id, patient_local_id)
+                    )
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_beacon_hospital ON gennet_beacon(hospital_id);
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_beacon_variant ON gennet_beacon(variant_cdna);
+                """)
 
     _init_db()
 
@@ -80,6 +101,81 @@ if USE_DB:
                         (Jsonb(state),),
                     )
 
+    def beacon_upsert(hospital_id: str, payload: dict) -> dict:
+        """Insert or update a beacon aggregate for one patient."""
+        with psycopg.connect(_DB_URL, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO gennet_beacon
+                        (hospital_id, patient_local_id, variant_cdna, variant_protein,
+                         effect_type, exon, phenotype_tag, drug_response)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (hospital_id, patient_local_id) DO UPDATE SET
+                        variant_cdna    = EXCLUDED.variant_cdna,
+                        variant_protein = EXCLUDED.variant_protein,
+                        effect_type     = EXCLUDED.effect_type,
+                        exon            = EXCLUDED.exon,
+                        phenotype_tag   = EXCLUDED.phenotype_tag,
+                        drug_response   = EXCLUDED.drug_response,
+                        submitted_at    = NOW()
+                    RETURNING id, submitted_at
+                """, (
+                    hospital_id,
+                    payload.get("patient_local_id", ""),
+                    payload.get("variant_cdna"),
+                    payload.get("variant_protein"),
+                    payload.get("effect_type"),
+                    payload.get("exon"),
+                    payload.get("phenotype_tag"),
+                    payload.get("drug_response"),
+                ))
+                row = cur.fetchone()
+                return {"id": row[0], "submitted_at": row[1].isoformat()}
+
+    def beacon_delete(hospital_id: str, patient_local_id: str) -> bool:
+        with psycopg.connect(_DB_URL, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM gennet_beacon WHERE hospital_id=%s AND patient_local_id=%s",
+                    (hospital_id, patient_local_id),
+                )
+                return cur.rowcount > 0
+
+    def beacon_stats() -> dict:
+        """Aggregate stats across all hospitals — what the coordinator can see."""
+        with psycopg.connect(_DB_URL) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM gennet_beacon")
+                total = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(DISTINCT hospital_id) FROM gennet_beacon")
+                hosp = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(DISTINCT variant_cdna) FROM gennet_beacon WHERE variant_cdna IS NOT NULL")
+                uniq_vars = cur.fetchone()[0]
+                cur.execute("""
+                    SELECT variant_cdna, COUNT(*) c, COUNT(DISTINCT hospital_id) h
+                    FROM gennet_beacon WHERE variant_cdna IS NOT NULL
+                    GROUP BY variant_cdna ORDER BY c DESC LIMIT 20
+                """)
+                by_variant = [{"variant": r[0], "count": r[1], "hospitals": r[2]} for r in cur.fetchall()]
+                cur.execute("""
+                    SELECT effect_type, COUNT(*) FROM gennet_beacon
+                    WHERE effect_type IS NOT NULL GROUP BY effect_type ORDER BY 2 DESC
+                """)
+                by_effect = [{"effect": r[0], "count": r[1]} for r in cur.fetchall()]
+                cur.execute("""
+                    SELECT drug_response, COUNT(*) FROM gennet_beacon
+                    WHERE drug_response IS NOT NULL GROUP BY drug_response ORDER BY 2 DESC
+                """)
+                by_drug = [{"drug": r[0], "count": r[1]} for r in cur.fetchall()]
+                return {
+                    "total_aggregates": total,
+                    "hospitals_contributing": hosp,
+                    "unique_variants": uniq_vars,
+                    "by_variant": by_variant,
+                    "by_effect": by_effect,
+                    "by_drug_response": by_drug,
+                }
+
 else:
     def load_state() -> dict:
         if not LOCAL_FILE.exists():
@@ -96,6 +192,77 @@ else:
             with tmp.open("w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
             tmp.replace(LOCAL_FILE)
+
+    BEACON_FILE = Path(os.environ.get("BEACON_FILE", "gennet_beacon.json"))
+
+    def _load_beacon_list() -> list:
+        if not BEACON_FILE.exists():
+            return []
+        try:
+            with BEACON_FILE.open("r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+
+    def _save_beacon_list(items: list) -> None:
+        tmp = BEACON_FILE.with_suffix(".tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+        tmp.replace(BEACON_FILE)
+
+    def beacon_upsert(hospital_id: str, payload: dict) -> dict:
+        with state_lock:
+            items = _load_beacon_list()
+            pid = payload.get("patient_local_id", "")
+            items = [x for x in items if not (x["hospital_id"] == hospital_id and x["patient_local_id"] == pid)]
+            rec = {
+                "id": len(items) + 1,
+                "hospital_id": hospital_id,
+                "patient_local_id": pid,
+                "variant_cdna": payload.get("variant_cdna"),
+                "variant_protein": payload.get("variant_protein"),
+                "effect_type": payload.get("effect_type"),
+                "exon": payload.get("exon"),
+                "phenotype_tag": payload.get("phenotype_tag"),
+                "drug_response": payload.get("drug_response"),
+                "submitted_at": now_iso(),
+            }
+            items.append(rec)
+            _save_beacon_list(items)
+            return {"id": rec["id"], "submitted_at": rec["submitted_at"]}
+
+    def beacon_delete(hospital_id: str, patient_local_id: str) -> bool:
+        with state_lock:
+            items = _load_beacon_list()
+            new = [x for x in items if not (x["hospital_id"] == hospital_id and x["patient_local_id"] == patient_local_id)]
+            if len(new) == len(items):
+                return False
+            _save_beacon_list(new)
+            return True
+
+    def beacon_stats() -> dict:
+        items = _load_beacon_list()
+        hosp = {x["hospital_id"] for x in items}
+        uniq = {x["variant_cdna"] for x in items if x.get("variant_cdna")}
+        from collections import Counter
+        by_v = Counter()
+        by_v_h = {}
+        for x in items:
+            v = x.get("variant_cdna")
+            if v:
+                by_v[v] += 1
+                by_v_h.setdefault(v, set()).add(x["hospital_id"])
+        by_eff = Counter(x.get("effect_type") for x in items if x.get("effect_type"))
+        by_drug = Counter(x.get("drug_response") for x in items if x.get("drug_response"))
+        return {
+            "total_aggregates": len(items),
+            "hospitals_contributing": len(hosp),
+            "unique_variants": len(uniq),
+            "by_variant": [{"variant": v, "count": c, "hospitals": len(by_v_h[v])}
+                           for v, c in by_v.most_common(20)],
+            "by_effect": [{"effect": e, "count": c} for e, c in by_eff.most_common()],
+            "by_drug_response": [{"drug": d, "count": c} for d, c in by_drug.most_common()],
+        }
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -117,7 +284,7 @@ def find_hospital_by_id(state: dict, hid: str) -> Optional[dict]:
 
 
 # ── App ────────────────────────────────────────────────────────────────────
-app = FastAPI(title="GenNet — Level 2", version="0.2.0")
+app = FastAPI(title="GenNet — Level 2", version="0.3.0")
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -367,9 +534,61 @@ async def health():
     return {
         "status": "ok",
         "service": "GenNet Coordinator",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "storage": "postgres" if USE_DB else "json-file",
     }
+
+
+@app.post("/api/beacon/submit")
+async def api_beacon_submit(request: Request):
+    """Receive an aggregate from a doctor's simulator.
+    Only the doctor logged into that hospital can submit beacons for it.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid_json"}, status_code=400)
+    hid = body.get("hospital_id", "")
+    if not is_in_hospital(request, hid):
+        return JSONResponse({"ok": False, "error": "not_logged_in_to_hospital"}, status_code=403)
+    state = load_state()
+    if find_hospital_by_id(state, hid) is None:
+        return JSONResponse({"ok": False, "error": "unknown_hospital"}, status_code=404)
+    payload = {
+        "patient_local_id": str(body.get("patient_local_id", "")).strip()[:64],
+        "variant_cdna":     (body.get("variant_cdna") or "").strip()[:200] or None,
+        "variant_protein":  (body.get("variant_protein") or "").strip()[:200] or None,
+        "effect_type":      (body.get("effect_type") or "").strip()[:60] or None,
+        "exon":             (body.get("exon") or "").strip()[:20] or None,
+        "phenotype_tag":    (body.get("phenotype_tag") or "").strip()[:80] or None,
+        "drug_response":    (body.get("drug_response") or "").strip()[:80] or None,
+    }
+    if not payload["patient_local_id"]:
+        return JSONResponse({"ok": False, "error": "missing_patient_local_id"}, status_code=400)
+    result = beacon_upsert(hid, payload)
+    return JSONResponse({"ok": True, "aggregate_id": result["id"], "submitted_at": result["submitted_at"]})
+
+
+@app.post("/api/beacon/delete")
+async def api_beacon_delete(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid_json"}, status_code=400)
+    hid = body.get("hospital_id", "")
+    pid = str(body.get("patient_local_id", "")).strip()
+    if not is_in_hospital(request, hid):
+        return JSONResponse({"ok": False, "error": "not_logged_in_to_hospital"}, status_code=403)
+    if not pid:
+        return JSONResponse({"ok": False, "error": "missing_patient_local_id"}, status_code=400)
+    deleted = beacon_delete(hid, pid)
+    return JSONResponse({"ok": True, "deleted": deleted})
+
+
+@app.get("/api/beacon/stats")
+async def api_beacon_stats():
+    """Public stats — what the coordinator can show. No patient identities."""
+    return JSONResponse(beacon_stats())
 
 
 if __name__ == "__main__":
