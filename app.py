@@ -176,6 +176,57 @@ if USE_DB:
                     "by_drug_response": by_drug,
                 }
 
+    def beacon_match(query_hospital_id: str, variant_cdna: str = None,
+                     effect_type: str = None, exon: str = None,
+                     phenotype_tag: str = None) -> dict:
+        """Find coincidences in OTHER hospitals for a given query.
+        Returns matches by levels (exact variant > same exon > same effect > same phenotype).
+        Never returns patient identities, only counts and hospital names.
+        """
+        levels = {"exact_variant": [], "same_exon": [], "same_effect": [], "same_phenotype": []}
+        with psycopg.connect(_DB_URL) as conn:
+            with conn.cursor() as cur:
+                if variant_cdna:
+                    cur.execute("""
+                        SELECT b.hospital_id, COUNT(*) c,
+                               array_agg(DISTINCT b.drug_response) FILTER (WHERE b.drug_response IS NOT NULL),
+                               array_agg(DISTINCT b.phenotype_tag) FILTER (WHERE b.phenotype_tag IS NOT NULL)
+                        FROM gennet_beacon b
+                        WHERE b.variant_cdna = %s AND b.hospital_id <> %s
+                        GROUP BY b.hospital_id ORDER BY c DESC
+                    """, (variant_cdna, query_hospital_id))
+                    levels["exact_variant"] = [
+                        {"hospital_id": r[0], "count": r[1],
+                         "drug_responses": list(r[2] or []), "phenotypes": list(r[3] or [])}
+                        for r in cur.fetchall()
+                    ]
+                if exon:
+                    cur.execute("""
+                        SELECT b.hospital_id, COUNT(*) c
+                        FROM gennet_beacon b
+                        WHERE b.exon = %s AND b.hospital_id <> %s
+                          AND (b.variant_cdna IS NULL OR b.variant_cdna <> COALESCE(%s,''))
+                        GROUP BY b.hospital_id ORDER BY c DESC
+                    """, (exon, query_hospital_id, variant_cdna))
+                    levels["same_exon"] = [{"hospital_id": r[0], "count": r[1]} for r in cur.fetchall()]
+                if effect_type:
+                    cur.execute("""
+                        SELECT b.hospital_id, COUNT(*) c
+                        FROM gennet_beacon b
+                        WHERE b.effect_type = %s AND b.hospital_id <> %s
+                        GROUP BY b.hospital_id ORDER BY c DESC
+                    """, (effect_type, query_hospital_id))
+                    levels["same_effect"] = [{"hospital_id": r[0], "count": r[1]} for r in cur.fetchall()]
+                if phenotype_tag:
+                    cur.execute("""
+                        SELECT b.hospital_id, COUNT(*) c
+                        FROM gennet_beacon b
+                        WHERE b.phenotype_tag = %s AND b.hospital_id <> %s
+                        GROUP BY b.hospital_id ORDER BY c DESC
+                    """, (phenotype_tag, query_hospital_id))
+                    levels["same_phenotype"] = [{"hospital_id": r[0], "count": r[1]} for r in cur.fetchall()]
+        return levels
+
 else:
     def load_state() -> dict:
         if not LOCAL_FILE.exists():
@@ -264,6 +315,43 @@ else:
             "by_drug_response": [{"drug": d, "count": c} for d, c in by_drug.most_common()],
         }
 
+    def beacon_match(query_hospital_id: str, variant_cdna: str = None,
+                     effect_type: str = None, exon: str = None,
+                     phenotype_tag: str = None) -> dict:
+        items = _load_beacon_list()
+        others = [x for x in items if x["hospital_id"] != query_hospital_id]
+        from collections import defaultdict, Counter
+        levels = {"exact_variant": [], "same_exon": [], "same_effect": [], "same_phenotype": []}
+
+        if variant_cdna:
+            byh = defaultdict(lambda: {"count": 0, "drug_responses": set(), "phenotypes": set()})
+            for x in others:
+                if x.get("variant_cdna") == variant_cdna:
+                    byh[x["hospital_id"]]["count"] += 1
+                    if x.get("drug_response"): byh[x["hospital_id"]]["drug_responses"].add(x["drug_response"])
+                    if x.get("phenotype_tag"): byh[x["hospital_id"]]["phenotypes"].add(x["phenotype_tag"])
+            levels["exact_variant"] = sorted(
+                [{"hospital_id": h, "count": d["count"],
+                  "drug_responses": list(d["drug_responses"]), "phenotypes": list(d["phenotypes"])}
+                 for h, d in byh.items()],
+                key=lambda r: -r["count"])
+
+        if exon:
+            byh = Counter(x["hospital_id"] for x in others
+                          if x.get("exon") == exon
+                          and (not variant_cdna or x.get("variant_cdna") != variant_cdna))
+            levels["same_exon"] = [{"hospital_id": h, "count": c} for h, c in byh.most_common()]
+
+        if effect_type:
+            byh = Counter(x["hospital_id"] for x in others if x.get("effect_type") == effect_type)
+            levels["same_effect"] = [{"hospital_id": h, "count": c} for h, c in byh.most_common()]
+
+        if phenotype_tag:
+            byh = Counter(x["hospital_id"] for x in others if x.get("phenotype_tag") == phenotype_tag)
+            levels["same_phenotype"] = [{"hospital_id": h, "count": c} for h, c in byh.most_common()]
+
+        return levels
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 def now_iso() -> str:
@@ -284,7 +372,7 @@ def find_hospital_by_id(state: dict, hid: str) -> Optional[dict]:
 
 
 # ── App ────────────────────────────────────────────────────────────────────
-app = FastAPI(title="GenNet — Level 2", version="0.3.0")
+app = FastAPI(title="GenNet — Level 2", version="0.4.0")
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -534,7 +622,7 @@ async def health():
     return {
         "status": "ok",
         "service": "GenNet Coordinator",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "storage": "postgres" if USE_DB else "json-file",
     }
 
@@ -589,6 +677,46 @@ async def api_beacon_delete(request: Request):
 async def api_beacon_stats():
     """Public stats — what the coordinator can show. No patient identities."""
     return JSONResponse(beacon_stats())
+
+
+@app.post("/api/beacon/match")
+async def api_beacon_match(request: Request):
+    """Find coincidences in the federated network for a given query.
+    Only a doctor logged into a hospital can query (so we know who 'we' are
+    and exclude their own hospital from results).
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid_json"}, status_code=400)
+    hid = body.get("hospital_id", "")
+    if not is_in_hospital(request, hid):
+        return JSONResponse({"ok": False, "error": "not_logged_in_to_hospital"}, status_code=403)
+    raw = beacon_match(
+        query_hospital_id=hid,
+        variant_cdna=(body.get("variant_cdna") or "").strip() or None,
+        effect_type=(body.get("effect_type") or "").strip() or None,
+        exon=(body.get("exon") or "").strip() or None,
+        phenotype_tag=(body.get("phenotype_tag") or "").strip() or None,
+    )
+    # Enrich with hospital display names (no patient identities here)
+    state = load_state()
+    name_map = {h["id"]: {"hospital": h["hospital"], "city": h.get("city", "")}
+                for h in state["approved"]}
+    def enrich(items):
+        out = []
+        for r in items:
+            meta = name_map.get(r["hospital_id"], {"hospital": "Unknown hospital", "city": ""})
+            out.append({**r, "hospital_name": meta["hospital"], "hospital_city": meta["city"]})
+        return out
+    return JSONResponse({
+        "ok": True,
+        "query_hospital_id": hid,
+        "exact_variant":  enrich(raw["exact_variant"]),
+        "same_exon":      enrich(raw["same_exon"]),
+        "same_effect":    enrich(raw["same_effect"]),
+        "same_phenotype": enrich(raw["same_phenotype"]),
+    })
 
 
 if __name__ == "__main__":
