@@ -104,10 +104,18 @@
 {% endif %}
 
 <div style="margin-top:40px;padding:18px 22px;background:#fff;border:1px solid var(--line);border-radius:14px">
-  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px;gap:10px;flex-wrap:wrap">
     <h2 style="margin:0">Federated network · live</h2>
-    <button class="btn btn-sm" onclick="refreshFedAdmin()">↻ Refresh</button>
+    <div style="display:flex;gap:8px">
+      <form method="post" action="/admin/purge-orphans" style="margin:0" onsubmit="return confirm('Remove ALL aggregates from hospitals that no longer exist in the network?\\n\\nThis is irreversible.');">
+        <button type="submit" class="btn btn-sm" style="background:#fff;color:#8a4a00;border-color:#e0c089">⚠ Purge orphans</button>
+      </form>
+      <button class="btn btn-sm" onclick="refreshFedAdmin()">↻ Refresh</button>
+    </div>
   </div>
+  {% if request.query_params.get('purged') %}
+  <div style="background:#e8f5ee;border:1px solid #a3d9c4;color:#0a5a42;padding:8px 12px;border-radius:8px;margin-bottom:12px;font-size:13px">✓ Removed {{ request.query_params.get('purged') }} orphan aggregate(s) from the coordinator.</div>
+  {% endif %}
   <p class="lede" style="font-size:13px;margin-top:0">Aggregate counts received from approved hospitals. <b>No patient identities</b> here — this is what GenNet would receive in production.</p>
   <div id="fed-empty" style="display:none;color:var(--ink3);font-style:italic;padding:12px 0">No aggregates received yet.</div>
   <div id="fed-body" style="display:none">
