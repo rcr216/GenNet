@@ -185,6 +185,24 @@ if USE_DB:
                     "by_drug_response": by_drug,
                 }
 
+    def beacon_purge_by_hospital(hospital_id: str) -> int:
+        """Remove ALL aggregates from a hospital — used when admin removes the hospital."""
+        with psycopg.connect(_DB_URL, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM gennet_beacon WHERE hospital_id = %s", (hospital_id,))
+                return cur.rowcount
+
+    def beacon_purge_orphans(valid_hospital_ids) -> int:
+        """Remove aggregates whose hospital_id is not in the approved list."""
+        ids = list(valid_hospital_ids)
+        with psycopg.connect(_DB_URL, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                if not ids:
+                    cur.execute("DELETE FROM gennet_beacon")
+                else:
+                    cur.execute("DELETE FROM gennet_beacon WHERE hospital_id <> ALL(%s)", (ids,))
+                return cur.rowcount
+
     def beacon_match(query_hospital_id: str, variant_cdna: str = None,
                      effect_type: str = None, exon: str = None,
                      codon: int = None, protein_domain: str = None,
@@ -344,6 +362,23 @@ else:
             "by_drug_response": [{"drug": d, "count": c} for d, c in by_drug.most_common()],
         }
 
+    def beacon_purge_by_hospital(hospital_id: str) -> int:
+        with state_lock:
+            items = _load_beacon_list()
+            new = [x for x in items if x["hospital_id"] != hospital_id]
+            removed = len(items) - len(new)
+            _save_beacon_list(new)
+            return removed
+
+    def beacon_purge_orphans(valid_hospital_ids) -> int:
+        valid = set(valid_hospital_ids)
+        with state_lock:
+            items = _load_beacon_list()
+            new = [x for x in items if x["hospital_id"] in valid]
+            removed = len(items) - len(new)
+            _save_beacon_list(new)
+            return removed
+
     def beacon_match(query_hospital_id: str, variant_cdna: str = None,
                      effect_type: str = None, exon: str = None,
                      codon: int = None, protein_domain: str = None,
@@ -414,7 +449,7 @@ def find_hospital_by_id(state: dict, hid: str) -> Optional[dict]:
 
 
 # ── App ────────────────────────────────────────────────────────────────────
-app = FastAPI(title="GenNet — Level 2", version="0.4.1")
+app = FastAPI(title="GenNet — Level 2", version="0.4.2")
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -542,6 +577,11 @@ async def admin_remove(req_id: str, request: Request):
     state = load_state()
     state["approved"] = [x for x in state["approved"] if x["id"] != req_id]
     save_state(state)
+    # Also purge any aggregates this hospital had — data integrity rule
+    try:
+        beacon_purge_by_hospital(req_id)
+    except Exception:
+        pass
     return RedirectResponse(url="/admin", status_code=303)
 
 
@@ -664,7 +704,7 @@ async def health():
     return {
         "status": "ok",
         "service": "GenNet Coordinator",
-        "version": "0.4.1",
+        "version": "0.4.2",
         "storage": "postgres" if USE_DB else "json-file",
     }
 
@@ -720,6 +760,17 @@ async def api_beacon_delete(request: Request):
         return JSONResponse({"ok": False, "error": "missing_patient_local_id"}, status_code=400)
     deleted = beacon_delete(hid, pid)
     return JSONResponse({"ok": True, "deleted": deleted})
+
+
+@app.post("/admin/purge-orphans")
+async def admin_purge_orphans(request: Request):
+    """Remove aggregates whose hospital no longer exists. Admin only."""
+    if not is_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+    state = load_state()
+    valid = [h["id"] for h in state["approved"]]
+    removed = beacon_purge_orphans(valid)
+    return RedirectResponse(url=f"/admin?purged={removed}", status_code=303)
 
 
 @app.get("/api/beacon/stats")
