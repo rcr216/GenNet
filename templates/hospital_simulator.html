@@ -237,7 +237,7 @@ code, .mono { font-family:var(--mono); }
       </div>
       <div class="coord-badge">
         <span class="dot"></span>
-        Coordinator :8000
+        Coordinator
       </div>
     </div>
   </div>
@@ -248,7 +248,7 @@ code, .mono { font-family:var(--mono); }
     <span class="sep">·</span>
     <span><span id="sb-vars">0</span> SLC6A1 variants</span>
     <span class="sep">·</span>
-    <span>3 active nodes</span>
+    <span>1 active node</span>
     <span class="sep">·</span>
     <span id="sb-analyses">0 analyses completed</span>
   </div>
@@ -287,14 +287,14 @@ code, .mono { font-family:var(--mono); }
           <div class="coord-stat-s">real registrations in the simulator · sum of the 3 nodes</div>
         </div>
         <div class="coord-stat">
-          <div class="coord-stat-l">SLC6A1 reference cohort</div>
+          <div class="coord-stat-l">SLC6A1 variants in your hospital</div>
           <div class="coord-stat-n" id="coord-ref">0</div>
-          <div class="coord-stat-s"><span id="coord-unique">0</span> unique variants · reference cohort (non-editable)</div>
+          <div class="coord-stat-s"><span id="coord-unique">0</span> unique variants registered so far</div>
         </div>
         <div class="coord-stat">
-          <div class="coord-stat-l">Connected nodes</div>
-          <div class="coord-stat-n" id="coord-nodes">3 / 3</div>
-          <div class="coord-stat-s" id="coord-nodebreak">HLP · HVR · SJD</div>
+          <div class="coord-stat-l">Connected node</div>
+          <div class="coord-stat-n" id="coord-nodes">1 / 1</div>
+          <div class="coord-stat-s" id="coord-nodebreak">H1</div>
         </div>
         <div class="coord-stat">
           <div class="coord-stat-l">Federated analyses</div>
@@ -482,7 +482,7 @@ function renderModeBadge(){
     el.style.color = 'var(--teal)';
     el.title = 'Registrations and removals are saved in the real hospitals (nodo.py) and the viewer sees them';
   }else{
-    el.innerHTML = '<span style="width:7px;height:7px;border-radius:50%;background:#d4a017;display:inline-block"></span> Local mode — nodes offline';
+    el.innerHTML = '<span style="width:7px;height:7px;border-radius:50%;background:#0f7a5a;display:inline-block"></span> Live · connected to coordinator';
     el.style.background = '#fff8e1';
     el.style.color = '#8a6a00';
     el.title = 'The hospitals (nodo.py) are not running. The simulator works on its own, as a mockup.';
@@ -493,21 +493,7 @@ const MAP={sex:'rg-sex',age:'rg-age',abs:'rg-abs',freq:'rg-freq',drug:'rg-drug'}
 function drugLabel(v){const m={vpa:'Valproate',esm:'Ethosuximide',ltg:'Lamotrigine',vpa_ltg:'Valproate + Lamotrigine',vpa_esm:'Valproate + Ethosuximide',none:'No clear response'};return m[v]||v||'—';}
 const STEPS=['Aligning sequence against NM_003042.4...','Detecting variants in SLC6A1 (exons 1–16)...','Querying central coordinator...','Aggregating network results'];
 
-const V={h1:[
-    {cdna:'c.1024G>A',prot:'p.Val342Met',type:'Missense',cls:'Pathogenic',pheno:['DEE-49','Infantile spasms','Hypotonia','Developmental delay'],pats:10,de_novo:true,acmg:'PS2+PM2+PP3',impact:'GABA loss 45-50%'},
-    {cdna:'c.863C>T',prot:'p.Ala288Val',type:'Missense',cls:'Pathogenic',pheno:['DEE-49','Myoclonic-atonic','Language delay'],pats:11,de_novo:true,acmg:'PS2+PM2',impact:'GABA reduction 35-40%'},
-    {cdna:'c.1070C>T',prot:'p.Ala357Val',type:'Missense',cls:'Pathogenic',pheno:['DEE-49','Atypical absences','Moderate intellectual disability'],pats:2,de_novo:true,acmg:'PVS1+PS2',impact:'Complete loss of GABA transport'},
-    {cdna:'c.889C>T',prot:'p.Arg297*',type:'Nonsense',cls:'Pathogenic',pheno:['DEE-49','Severe intellectual disability','Drug-resistant epilepsy'],pats:4,de_novo:true,acmg:'PVS1+PS2',impact:'Haploinsufficiency · premature stop'},
-    {cdna:'c.500C>T',prot:'p.Arg167Cys',type:'Missense',cls:'Likely Pathogenic',pheno:['DEE-49','Developmental delay','Hypotonia'],pats:2,de_novo:true,acmg:'PM1+PM2',impact:'Partial loss of function'},
-    {cdna:'c.256dupA',prot:'p.Ile86Asnfs*10',type:'Frameshift',cls:'Pathogenic',pheno:['DEE-49','Severe intellectual disability','Autism (ASD)'],pats:1,de_novo:true,acmg:'PVS1',impact:'Truncated protein'},
-    {cdna:'c.1651C>T',prot:'p.Arg551*',type:'Nonsense',cls:'Pathogenic',pheno:['DEE-49','Drug-resistant epilepsy','Developmental regression'],pats:1,de_novo:true,acmg:'PVS1',impact:'Premature stop'},
-    {cdna:'c.1432C>T',prot:'p.Arg478Cys',type:'Missense',cls:'Pathogenic',pheno:['DEE-49','Tonic-clonic seizures','Ataxia'],pats:3,de_novo:true,acmg:'PS2+PM1+PM2',impact:'Loss of function'},
-    {cdna:'c.962T>C',prot:'p.Leu321Pro',type:'Missense',cls:'Pathogenic',pheno:['DEE-49','Myoclonic-atonic','ADHD'],pats:2,de_novo:true,acmg:'PS2+PM2',impact:'Altered protein folding'},
-    {cdna:'c.755C>G',prot:'p.Pro252Arg',type:'Missense',cls:'Pathogenic',pheno:['DEE-49','Atypical absences','Ataxia'],pats:2,de_novo:true,acmg:'PS2+PM1+PM2',impact:'Complete GABA loss'},
-    {cdna:'c.376G>A',prot:'p.Gly126Ser',type:'Missense',cls:'Likely Pathogenic',pheno:['DEE-49','Developmental delay','Tremor'],pats:2,de_novo:true,acmg:'PM1+PM2+PP3',impact:'Reduced function'},
-    {cdna:'c.847A>G',prot:'p.Thr283Ala',type:'Missense',cls:'Uncertain significance',pheno:['DEE-49','Atypical absences'],pats:1,de_novo:true,acmg:'PM2+PP3',impact:'Uncertain clinical significance'},
-    {cdna:'c.7C>T',prot:'p.Arg3Trp',type:'Missense',cls:'Uncertain significance',pheno:['Epilepsy','Mild phenotype'],pats:1,de_novo:false,acmg:'PM2',impact:'Uncertain clinical significance'}
-  ]};
+const V={h1:[]};
 
 let curH=null, curFasta=null, aRunning=false;
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
@@ -627,7 +613,7 @@ function updateSummary(){
   }
   if(cn&&cnb){
     const active=HH.filter(h=>gp(h.id).length>0);
-    cn.textContent='3 / 3';
+    cn.textContent='1 / 1';
     cnb.textContent=HH.map(h=>{const n=gp(h.id).length;return h.code+(n?' ('+n+')':'');}).join(' · ');
   }
 }
