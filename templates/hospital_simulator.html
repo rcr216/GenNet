@@ -365,6 +365,10 @@ code, .mono { font-family:var(--mono); }
     <div class="field" id="frow" style="display:none"><div class="field-lbl">🌐 How frequent?</div><div class="rg" id="rg-freq"></div></div>
     <div class="field"><div class="field-lbl">🌐 Best therapeutic response to:</div><div class="rg" id="rg-drug"></div></div>
     <div class="field">
+      <div class="field-lbl">🌐 Variant (cDNA) <span style="font-weight:400;color:var(--ink3)">(optional · if known from the patient's record)</span></div>
+      <input type="text" id="fvariant" placeholder="e.g. c.889C>T" style="width:100%;padding:9px 12px;border:1px solid #b3d4f0;border-radius:var(--radius);font-family:var(--mono);font-size:13px;color:var(--ink);background:#f7fbff;outline:none;box-sizing:border-box">
+    </div>
+    <div class="field">
       <div class="field-lbl">🔒 Clinical description <span style="font-weight:400;color:var(--ink3)">(free text · stays in this hospital)</span></div>
       <textarea id="fdesc" rows="4" placeholder="Freely describe the patient's clinical picture: age of onset, seizure type, drugs tried and response, EEG findings, family history, progression... The AI will extract the clinical concepts so they can be compared with other patients in the network." style="width:100%;padding:10px 12px;border:1px solid #b3d4f0;border-radius:var(--radius);font-family:var(--sans);font-size:12px;color:var(--ink);background:#f7fbff;resize:vertical;line-height:1.55;outline:none;box-sizing:border-box"></textarea>
       <button class="btn btn-sm btn-blue" id="desc-ai-btn" onclick="interpretDesc()" style="margin-top:7px">🔍 Interpret with AI</button>
@@ -452,7 +456,7 @@ async function pullFromNodes(){
         id:p.id, sex:p.sex, age:p.age, ausencias:p.ausencias, frecuencia:p.frecuencia,
         drug:p.drug, descripcion:p.descripcion||null, descAI:p.descAI||null, fasta:p.fasta||null, fastaSlc6a1:p.fastaSlc6a1, ts:p.ts||new Date().toISOString()
       }));
-      localStorage.setItem('gn3_p_'+h.id, JSON.stringify(mapped));
+      localStorage.setItem('gn3_'+HOSPITAL_ID+'_p_'+h.id, JSON.stringify(mapped));
     }catch(e){}
   }
   renderDash();
@@ -503,12 +507,12 @@ const V={h1:[]};
 
 let curH=null, curFasta=null, aRunning=false;
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
-const gp=hid=>JSON.parse(localStorage.getItem('gn3_p_'+hid)||'[]');
-const sp=(hid,p)=>{const ps=gp(hid);ps.push(p);localStorage.setItem('gn3_p_'+hid,JSON.stringify(ps));};
-const gev=()=>JSON.parse(localStorage.getItem('gn3_evts')||'[]');
-function aev(type,msg){const e=gev();const n=new Date();const t=[n.getHours(),n.getMinutes(),n.getSeconds()].map(x=>String(x).padStart(2,'0')).join(':');e.unshift({t,type,msg});localStorage.setItem('gn3_evts',JSON.stringify(e.slice(0,150)));}
-const gan=()=>JSON.parse(localStorage.getItem('gn3_an')||'[]');
-function san(a){const arr=gan();const i=arr.findIndex(x=>x.pid===a.pid);if(i>=0)arr[i]=a;else arr.push(a);localStorage.setItem('gn3_an',JSON.stringify(arr));}
+const gp=hid=>JSON.parse(localStorage.getItem('gn3_'+HOSPITAL_ID+'_p_'+hid)||'[]');
+const sp=(hid,p)=>{const ps=gp(hid);ps.push(p);localStorage.setItem('gn3_'+HOSPITAL_ID+'_p_'+hid,JSON.stringify(ps));};
+const gev=()=>JSON.parse(localStorage.getItem('gn3_'+HOSPITAL_ID+'_evts')||'[]');
+function aev(type,msg){const e=gev();const n=new Date();const t=[n.getHours(),n.getMinutes(),n.getSeconds()].map(x=>String(x).padStart(2,'0')).join(':');e.unshift({t,type,msg});localStorage.setItem('gn3_'+HOSPITAL_ID+'_evts',JSON.stringify(e.slice(0,150)));}
+const gan=()=>JSON.parse(localStorage.getItem('gn3_'+HOSPITAL_ID+'_an')||'[]');
+function san(a){const arr=gan();const i=arr.findIndex(x=>x.pid===a.pid);if(i>=0)arr[i]=a;else arr.push(a);localStorage.setItem('gn3_'+HOSPITAL_ID+'_an',JSON.stringify(arr));}
 const tot=()=>HH.reduce((a,h)=>a+gp(h.id).length,0);
 
 function clsColor(c){return c==='Pathogenic'?'var(--red)':c==='Likely Pathogenic'?'var(--amber)':c==='Uncertain significance'?'var(--ink3)':'var(--teal)';}
@@ -629,11 +633,11 @@ function deletePat(hid,pid){
   if(!confirm('Delete patient '+pid+' from node '+h.name+'?\n\nThis action cannot be undone. The clinical data and FASTA will be erased from the node.')) return;
   // Remove from patient list
   let ps=gp(hid).filter(p=>p.id!==pid);
-  localStorage.setItem('gn3_p_'+hid,JSON.stringify(ps));
+  localStorage.setItem('gn3_'+HOSPITAL_ID+'_p_'+hid,JSON.stringify(ps));
   deletePatientFromNode(hid, pid);   // ◄ HYBRID MODE: echo the removal to the real hospital
   // Remove associated analysis if exists
   let ans=gan().filter(a=>a.pid!==pid);
-  localStorage.setItem('gn3_an',JSON.stringify(ans));
+  localStorage.setItem('gn3_'+HOSPITAL_ID+'_an',JSON.stringify(ans));
   // Log the event
   aev('alert','REMOVAL: patient '+pid+' deleted from node '+h.code+' by operator');
   aev('info','COORD: removal logged '+pid+' · node '+h.code+' · Network total: '+tot()+' patients');
@@ -697,6 +701,7 @@ function openF(hid){
   document.getElementById('fn').textContent='No file selected';
   document.getElementById('fi').value='';document.getElementById('frow').style.display='none';document.getElementById('ferr').style.display='none';
   document.getElementById('fdesc').value='';
+  document.getElementById('fvariant').value='';
   const dab=document.getElementById('desc-ai-box');dab.style.display='none';dab.innerHTML='';
   document.getElementById('desc-ai-btn').disabled=false;document.getElementById('desc-ai-btn').textContent='🔍 Interpretar con IA';
   curDescAI=null;
@@ -889,6 +894,31 @@ function handleFasta(inp){
 // ── BEACON AGGREGATE TO COORDINATOR ───────────────────────────
 // Sends only the SHARED fields (variant/effect/exon/phenotype/drug response).
 // Full record stays in localStorage. This is the Beacon-style aggregate.
+// Best-effort inference from cDNA notation (c.NNNN<X>>Y or c.NNNN_NNNN<del/ins/dup>)
+function inferEffectFromVariant(v){
+  if(!v) return null;
+  v = v.trim();
+  if(/del|fs|frameshift/i.test(v)) return 'frameshift';
+  if(/>/.test(v)){
+    // simple SNV: try to guess stop codons (we cannot truly know without protein, so default to missense)
+    if(/Ter|\*|X/i.test(v)) return 'nonsense';
+    return 'missense';
+  }
+  if(/dup/i.test(v)) return 'duplication';
+  if(/ins/i.test(v)) return 'insertion';
+  return null;
+}
+// SLC6A1 NM_003042.4 exon boundaries (cDNA positions): approximate mapping
+function inferExonFromVariant(v){
+  if(!v) return null;
+  const m = v.match(/c\.(\d+)/);
+  if(!m) return null;
+  const pos = parseInt(m[1],10);
+  // SLC6A1 exon boundaries (cDNA pos for end of each exon, exons 1–16)
+  const ends = [83,196,320,446,517,653,798,892,1037,1149,1271,1418,1554,1697,1791,1848];
+  for(let i=0;i<ends.length;i++) if(pos<=ends[i]) return String(i+1);
+  return null;
+}
 function inferEffectFromDrug(p){
   if(p.descAI && p.descAI.tipo_crisis){
     const t = (p.descAI.tipo_crisis||'').toLowerCase();
@@ -902,10 +932,10 @@ async function sendBeaconAggregate(pat){
   const payload = {
     hospital_id:      HOSPITAL_ID,
     patient_local_id: pat.id,
-    variant_cdna:     pat.descAI && pat.descAI.variant_cdna ? pat.descAI.variant_cdna : null,
-    variant_protein:  pat.descAI && pat.descAI.variant_protein ? pat.descAI.variant_protein : null,
-    effect_type:      null,
-    exon:             null,
+    variant_cdna:     pat.variantManual || (pat.descAI && pat.descAI.variant_cdna) || null,
+    variant_protein:  (pat.descAI && pat.descAI.variant_protein) || null,
+    effect_type:      inferEffectFromVariant(pat.variantManual),
+    exon:             inferExonFromVariant(pat.variantManual),
     phenotype_tag:    inferEffectFromDrug(pat),
     drug_response:    pat.drug || null,
   };
@@ -943,7 +973,8 @@ function submitF(){
   if(miss.length){document.getElementById('ferr').textContent='Pending fields: '+miss.join(' · ');document.getElementById('ferr').style.display='block';return;}
   const ps=gp(curH.id);const num=String(ps.length+1).padStart(3,'0');const pid=curH.code+'-2026-'+num;const isFirst=ps.length===0;
   const desc=document.getElementById('fdesc').value.trim();
-  const pat={id:pid,sex,age,ausencias:abs,frecuencia:freq,drug,descripcion:desc||null,descAI:curDescAI||null,fasta:curFasta?curFasta.name:null,fastaSlc6a1:curFasta?curFasta.slc6a1:null,ts:new Date().toISOString()};
+  const variantManual=(document.getElementById('fvariant').value||'').trim();
+  const pat={id:pid,sex,age,ausencias:abs,frecuencia:freq,drug,variantManual:variantManual||null,descripcion:desc||null,descAI:curDescAI||null,fasta:curFasta?curFasta.name:null,fastaSlc6a1:curFasta?curFasta.slc6a1:null,ts:new Date().toISOString()};
   sp(curH.id,pat);
   pushPatientToNode(curH.id, pat);   // ◄ HYBRID MODE: echo to the real hospital if connected
   sendBeaconAggregate(pat);          // ◄ FEDERATED MODE: send aggregate to coordinator
@@ -1237,7 +1268,7 @@ function doSearch(){
   renderLog();
 }
 
-function clearLog(){localStorage.removeItem('gn3_evts');renderLog();}
+function clearLog(){localStorage.removeItem('gn3_'+HOSPITAL_ID+'_evts');renderLog();}
 
 // ── Network stats computed from the catalog (auto, never stale) ──
 function computeNetworkStats(){
