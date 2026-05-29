@@ -103,6 +103,61 @@
 </div>
 {% endif %}
 
+<div style="margin-top:40px;padding:18px 22px;background:#fff;border:1px solid var(--line);border-radius:14px">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">
+    <h2 style="margin:0">Federated network · live</h2>
+    <button class="btn btn-sm" onclick="refreshFedAdmin()">↻ Refresh</button>
+  </div>
+  <p class="lede" style="font-size:13px;margin-top:0">Aggregate counts received from approved hospitals. <b>No patient identities</b> here — this is what GenNet would receive in production.</p>
+  <div id="fed-empty" style="display:none;color:var(--ink3);font-style:italic;padding:12px 0">No aggregates received yet.</div>
+  <div id="fed-body" style="display:none">
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px">
+      <div style="background:var(--teal-bg);padding:14px 16px;border-radius:10px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--ink3)">Total aggregates</div>
+        <div id="fed-total" style="font-size:26px;font-weight:600;color:var(--teal-deep)">0</div>
+      </div>
+      <div style="background:var(--teal-bg);padding:14px 16px;border-radius:10px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--ink3)">Hospitals contributing</div>
+        <div id="fed-hosp" style="font-size:26px;font-weight:600;color:var(--teal-deep)">0</div>
+      </div>
+      <div style="background:var(--teal-bg);padding:14px 16px;border-radius:10px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--ink3)">Unique variants</div>
+        <div id="fed-uniq" style="font-size:26px;font-weight:600;color:var(--teal-deep)">0</div>
+      </div>
+    </div>
+    <div id="fed-detail" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;font-size:13px"></div>
+  </div>
+</div>
+
+<script>
+async function refreshFedAdmin(){
+  try{
+    const r = await fetch('/api/beacon/stats',{credentials:'same-origin'});
+    const s = await r.json();
+    const body = document.getElementById('fed-body');
+    const empty = document.getElementById('fed-empty');
+    if(!s || !s.total_aggregates){ body.style.display='none'; empty.style.display='block'; return; }
+    body.style.display=''; empty.style.display='none';
+    document.getElementById('fed-total').textContent = s.total_aggregates;
+    document.getElementById('fed-hosp').textContent  = s.hospitals_contributing;
+    document.getElementById('fed-uniq').textContent  = s.unique_variants;
+    const det = document.getElementById('fed-detail');
+    const block = (title, items, key, valKey) => {
+      let h = '<div><div style="font-weight:600;color:var(--ink);margin-bottom:8px">'+title+'</div>';
+      if(!items || !items.length){ h += '<div style="color:var(--ink3);font-style:italic;font-size:12px">none</div></div>'; return h; }
+      h += items.slice(0,10).map(it=>'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f0f0f0"><span style="font-family:var(--mono);font-size:12px">'+it[key]+'</span><span style="color:var(--ink3);font-size:12px">'+(valKey?it[valKey]+' hosp · ':'')+it.count+'</span></div>').join('');
+      return h+'</div>';
+    };
+    let html = '';
+    html += block('By variant (hosp · count)', s.by_variant, 'variant', 'hospitals');
+    html += block('By effect type', s.by_effect, 'effect');
+    html += block('By drug response', s.by_drug_response, 'drug');
+    det.innerHTML = html;
+  }catch(e){}
+}
+refreshFedAdmin();
+</script>
+
 <div style="margin-top:48px;padding-top:22px;border-top:1px solid var(--line);font-size:12px;color:var(--ink3);font-family:var(--mono)">
   GenNet Admin · personal codes are shown above so you can share them with each approved doctor by email.
 </div>
