@@ -304,6 +304,35 @@ code, .mono { font-family:var(--mono); }
       </div>
       <div class="coord-pulse" id="coord-pulse"></div>
     </div>
+
+    <div id="fed-panorama" style="background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:14px 18px;margin-top:14px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+        <div>
+          <div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--teal);font-weight:600">FEDERATED NETWORK · LIVE</div>
+          <div style="font-size:14px;font-weight:600;color:var(--ink)">Panorama across all hospitals</div>
+        </div>
+        <button class="btn btn-sm" onclick="refreshFedPanorama()">↻ Refresh</button>
+      </div>
+      <div id="fed-empty" style="display:none;font-size:12px;color:var(--ink3);padding:14px;text-align:center;font-style:italic">No aggregates received yet from any hospital.</div>
+      <div id="fed-body" style="display:none">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
+          <div style="background:#f4f9f6;border-radius:var(--radius);padding:10px 12px">
+            <div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--ink3)">Aggregates</div>
+            <div id="fed-total" style="font-size:22px;font-weight:600;color:var(--teal)">0</div>
+          </div>
+          <div style="background:#f4f9f6;border-radius:var(--radius);padding:10px 12px">
+            <div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--ink3)">Hospitals contributing</div>
+            <div id="fed-hosp" style="font-size:22px;font-weight:600;color:var(--teal)">0</div>
+          </div>
+          <div style="background:#f4f9f6;border-radius:var(--radius);padding:10px 12px">
+            <div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--ink3)">Unique variants</div>
+            <div id="fed-uniq" style="font-size:22px;font-weight:600;color:var(--teal)">0</div>
+          </div>
+        </div>
+        <div id="fed-detail" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;font-size:11px"></div>
+        <div style="font-size:10px;color:var(--ink3);font-style:italic;margin-top:10px;padding-top:8px;border-top:1px solid var(--line)">No patient identities. Each row counts how many hospitals share that attribute.</div>
+      </div>
+    </div>
   </div>
 
   <!-- TAB: ANÁLISIS FASTA -->
@@ -626,6 +655,7 @@ function updateSummary(){
     cn.textContent='1 / 1';
     cnb.textContent=HH.map(h=>{const n=gp(h.id).length;return h.code+(n?' ('+n+')':'');}).join(' · ');
   }
+  refreshFedPanorama();
 }
 
 function deletePat(hid,pid){
@@ -891,6 +921,35 @@ function handleFasta(inp){
   reader.readAsText(f);
 }
 
+async function refreshFedPanorama(){
+  try{
+    const r = await fetch('/api/beacon/stats',{credentials:'same-origin'});
+    const s = await r.json();
+    const body = document.getElementById('fed-body');
+    const empty = document.getElementById('fed-empty');
+    if(!s || !s.total_aggregates){ body.style.display='none'; empty.style.display='block'; return; }
+    body.style.display=''; empty.style.display='none';
+    document.getElementById('fed-total').textContent = s.total_aggregates;
+    document.getElementById('fed-hosp').textContent  = s.hospitals_contributing;
+    document.getElementById('fed-uniq').textContent  = s.unique_variants;
+    const det = document.getElementById('fed-detail');
+    const block = (title, items, key, valKey) => {
+      let h = '<div><div style="font-weight:600;color:var(--ink);margin-bottom:6px;font-size:11px">'+title+'</div>';
+      if(!items || !items.length){ h += '<div style="color:var(--ink3);font-style:italic">none</div></div>'; return h; }
+      h += items.slice(0,8).map(it=>'<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f0f0f0"><span style="font-family:var(--mono)">'+it[key]+'</span><span style="color:var(--ink3)">'+(valKey?it[valKey]+' · ':'')+it.count+'</span></div>').join('');
+      return h+'</div>';
+    };
+    let html = '';
+    html += block('By variant (count · hospitals)', s.by_variant, 'variant', 'hospitals');
+    html += block('By effect type', s.by_effect, 'effect');
+    html += block('By drug response', s.by_drug_response, 'drug');
+    det.innerHTML = html;
+  }catch(e){}
+}
+// Auto-refresh whenever the dashboard renders
+const _origRenderDash = (typeof renderDash !== 'undefined') ? renderDash : null;
+function refreshFedOnRender(){ setTimeout(refreshFedPanorama, 80); }
+
 // ── BEACON AGGREGATE TO COORDINATOR ───────────────────────────
 // Sends only the SHARED fields (variant/effect/exon/phenotype/drug response).
 // Full record stays in localStorage. This is the Beacon-style aggregate.
@@ -948,12 +1007,68 @@ async function sendBeaconAggregate(pat){
     if(data.ok){
       showBeaconToast(true);
       aev('coord','GenNet ← '+HOSPITAL_NAME+': aggregate #'+data.aggregate_id+' received · no patient identity transmitted');
+      checkFederatedMatches(payload);
     }else{
       showBeaconToast(false, data.error||'unknown error');
     }
   }catch(e){
     showBeaconToast(false, 'network');
   }
+}
+
+async function checkFederatedMatches(payload){
+  try{
+    const r = await fetch('/api/beacon/match',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        hospital_id: HOSPITAL_ID,
+        variant_cdna: payload.variant_cdna,
+        effect_type: payload.effect_type,
+        exon: payload.exon,
+        phenotype_tag: payload.phenotype_tag,
+      }), credentials:'same-origin'
+    });
+    const m = await r.json();
+    if(!m.ok) return;
+    const ex = m.exact_variant||[], se = m.same_exon||[],
+          ef = m.same_effect||[], sp = m.same_phenotype||[];
+    if(ex.length===0 && se.length===0 && ef.length===0 && sp.length===0){
+      aev('coord','GenNet: no federated coincidences for this patient (yet)');
+      return;
+    }
+    showFederatedMatch({ex, se, ef, sp});
+    if(ex.length) aev('alert','MATCH: variant '+payload.variant_cdna+' also in '+ex.length+' other hospital(s)');
+    if(ef.length) aev('coord','MATCH: same effect_type in '+ef.length+' hospital(s)');
+  }catch(e){ /* silent — match is opportunistic */ }
+}
+
+function showFederatedMatch(m){
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed;top:78px;right:24px;z-index:9999;width:380px;background:#fff;border:1px solid var(--teal);border-radius:var(--radius);box-shadow:0 6px 20px rgba(0,0,0,0.18);font-family:var(--sans);max-height:80vh;overflow-y:auto';
+  let h = '<div style="background:var(--teal);color:#fff;padding:11px 14px;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center"><span>⚡ Federated match detected</span><button onclick="this.closest(\'div[style*=fixed]\').remove()" style="background:transparent;color:#fff;border:0;font-size:18px;cursor:pointer;padding:0 4px">✕</button></div>';
+  h += '<div style="padding:12px 14px;font-size:12px;color:var(--ink)">';
+  const renderLvl = (title, items, color, showExtra) => {
+    if(!items.length) return '';
+    let block = '<div style="margin-bottom:10px"><div style="font-weight:600;color:'+color+';font-size:11px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">'+title+'</div>';
+    items.forEach(it=>{
+      block += '<div style="padding:7px 10px;background:'+color+'15;border-left:3px solid '+color+';border-radius:4px;margin-bottom:4px">';
+      block += '<div style="font-weight:600;color:var(--ink)">🏥 '+(it.hospital_name||'Unknown')+(it.hospital_city?' · '+it.hospital_city:'')+'</div>';
+      block += '<div style="color:var(--ink3);font-size:11px;margin-top:2px">'+it.count+' patient'+(it.count>1?'s':'');
+      if(showExtra && it.drug_responses && it.drug_responses.length) block += ' · drug: '+it.drug_responses.join('/');
+      if(showExtra && it.phenotypes && it.phenotypes.length) block += ' · '+it.phenotypes.join(', ');
+      block += '</div></div>';
+    });
+    block += '</div>';
+    return block;
+  };
+  h += renderLvl('Exact same variant', m.ex, '#0a5a42', true);
+  h += renderLvl('Same exon', m.se, '#1f8a6e', false);
+  h += renderLvl('Same effect type', m.ef, '#5e6a85', false);
+  h += renderLvl('Same phenotype', m.sp, '#7a5a85', false);
+  h += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:10px;color:var(--ink3);font-style:italic">No patient identities exchanged. Counts are derived from Beacon-style aggregates.</div>';
+  h += '</div>';
+  wrap.innerHTML = h;
+  document.body.appendChild(wrap);
 }
 function showBeaconToast(ok, errMsg){
   const t = document.createElement('div');
