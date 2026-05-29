@@ -354,19 +354,24 @@ code, .mono { font-family:var(--mono); }
       <span>Patient ID (auto-generated · pseudonymized)</span>
       <span class="id-val mono" id="fpid">---</span>
     </div>
-    <div class="field"><div class="field-lbl">Biological sex</div><div class="rg" id="rg-sex"></div></div>
-    <div class="field"><div class="field-lbl">Age range</div><div class="rg" id="rg-age"></div></div>
-    <div class="field"><div class="field-lbl">Does the patient have absence seizures?</div><div class="rg" id="rg-abs"></div></div>
-    <div class="field" id="frow" style="display:none"><div class="field-lbl">How frequent?</div><div class="rg" id="rg-freq"></div></div>
-    <div class="field"><div class="field-lbl">Best therapeutic response to:</div><div class="rg" id="rg-drug"></div></div>
+    <div style="background:#f0f7ff;border:1px solid #b3d4f0;border-radius:var(--radius);padding:9px 12px;margin:0 0 12px;font-size:11px;color:#1a4a7a;line-height:1.55">
+      <div style="font-weight:600;margin-bottom:3px">Demo · synthetic data</div>
+      Fields marked <span style="color:#1a4a7a;font-weight:600">🌐 shared</span> travel to the GenNet coordinator as an aggregate (Beacon-style, no patient identity).<br>
+      Fields marked <span style="color:#5e5e5e;font-weight:600">🔒 private</span> stay in your hospital and never leave.
+    </div>
+    <div class="field"><div class="field-lbl">🌐 Biological sex</div><div class="rg" id="rg-sex"></div></div>
+    <div class="field"><div class="field-lbl">🌐 Age range</div><div class="rg" id="rg-age"></div></div>
+    <div class="field"><div class="field-lbl">🌐 Does the patient have absence seizures?</div><div class="rg" id="rg-abs"></div></div>
+    <div class="field" id="frow" style="display:none"><div class="field-lbl">🌐 How frequent?</div><div class="rg" id="rg-freq"></div></div>
+    <div class="field"><div class="field-lbl">🌐 Best therapeutic response to:</div><div class="rg" id="rg-drug"></div></div>
     <div class="field">
-      <div class="field-lbl">Clinical description <span style="font-weight:400;color:var(--ink3)">(free text · AI-interpretable)</span></div>
+      <div class="field-lbl">🔒 Clinical description <span style="font-weight:400;color:var(--ink3)">(free text · stays in this hospital)</span></div>
       <textarea id="fdesc" rows="4" placeholder="Freely describe the patient's clinical picture: age of onset, seizure type, drugs tried and response, EEG findings, family history, progression... The AI will extract the clinical concepts so they can be compared with other patients in the network." style="width:100%;padding:10px 12px;border:1px solid #b3d4f0;border-radius:var(--radius);font-family:var(--sans);font-size:12px;color:var(--ink);background:#f7fbff;resize:vertical;line-height:1.55;outline:none;box-sizing:border-box"></textarea>
       <button class="btn btn-sm btn-blue" id="desc-ai-btn" onclick="interpretDesc()" style="margin-top:7px">🔍 Interpret with AI</button>
       <div id="desc-ai-box" style="display:none;background:var(--teal-bg);border:1px solid #a3d9c4;border-radius:var(--radius);padding:11px;margin-top:7px;font-size:11px"></div>
     </div>
     <div class="field">
-      <div class="field-lbl">FASTA sequence <span style="font-weight:400;color:var(--ink3)">(optional · enables the full federated analysis)</span></div>
+      <div class="field-lbl">🔒 FASTA sequence <span style="font-weight:400;color:var(--ink3)">(optional · stays in this hospital)</span></div>
       <div class="fasta-box" id="fasta-box">
         <span class="fasta-icon">🧬</span>
         <div style="flex:1;min-width:0">
@@ -398,6 +403,7 @@ code, .mono { font-family:var(--mono); }
 </div>
 
 <script>
+const HOSPITAL_ID = {{ hospital.id|tojson }};
 const HOSPITAL_NAME = {{ hospital.hospital|tojson }};
 const HOSPITAL_CITY = {{ (hospital.city or '')|tojson }};
 const HH=[{id:'h1',code:'H1',name:HOSPITAL_NAME,city:HOSPITAL_CITY,port:5001}];
@@ -880,6 +886,56 @@ function handleFasta(inp){
   reader.readAsText(f);
 }
 
+// ── BEACON AGGREGATE TO COORDINATOR ───────────────────────────
+// Sends only the SHARED fields (variant/effect/exon/phenotype/drug response).
+// Full record stays in localStorage. This is the Beacon-style aggregate.
+function inferEffectFromDrug(p){
+  if(p.descAI && p.descAI.tipo_crisis){
+    const t = (p.descAI.tipo_crisis||'').toLowerCase();
+    if(t.includes('absence')||t.includes('ausencia')) return 'absence epilepsy';
+    if(t.includes('myoclon')) return 'myoclonic epilepsy';
+    if(t.includes('tonic')) return 'tonic-clonic epilepsy';
+  }
+  return p.ausencias==='si' ? 'absence epilepsy' : null;
+}
+async function sendBeaconAggregate(pat){
+  const payload = {
+    hospital_id:      HOSPITAL_ID,
+    patient_local_id: pat.id,
+    variant_cdna:     pat.descAI && pat.descAI.variant_cdna ? pat.descAI.variant_cdna : null,
+    variant_protein:  pat.descAI && pat.descAI.variant_protein ? pat.descAI.variant_protein : null,
+    effect_type:      null,
+    exon:             null,
+    phenotype_tag:    inferEffectFromDrug(pat),
+    drug_response:    pat.drug || null,
+  };
+  try{
+    const r = await fetch('/api/beacon/submit',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload), credentials:'same-origin'
+    });
+    const data = await r.json();
+    if(data.ok){
+      showBeaconToast(true);
+      aev('coord','GenNet ← '+HOSPITAL_NAME+': aggregate #'+data.aggregate_id+' received · no patient identity transmitted');
+    }else{
+      showBeaconToast(false, data.error||'unknown error');
+    }
+  }catch(e){
+    showBeaconToast(false, 'network');
+  }
+}
+function showBeaconToast(ok, errMsg){
+  const t = document.createElement('div');
+  t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;padding:13px 18px;border-radius:var(--radius);font-size:13px;font-family:var(--sans);box-shadow:0 4px 14px rgba(0,0,0,0.15);max-width:380px;line-height:1.5;'
+    + (ok ? 'background:#e8f5ee;border:1px solid #a3d9c4;color:#0a5a42;' : 'background:#fdecea;border:1px solid #f5b7b1;color:#922b21;');
+  t.innerHTML = ok
+    ? '✓ <b>Patient saved.</b> Aggregate sent to coordinator · full record stays in your hospital.'
+    : '✗ Could not send aggregate ('+(errMsg||'')+'). The full record was saved locally.';
+  document.body.appendChild(t);
+  setTimeout(function(){ t.style.transition='opacity .5s'; t.style.opacity='0'; setTimeout(function(){t.remove();},500); }, 4200);
+}
+
 function submitF(){
   const sex=gs('sex'),age=gs('age'),abs=gs('abs'),drug=gs('drug'),freq=abs==='si'?gs('freq'):null;
   const miss=[];
@@ -890,6 +946,7 @@ function submitF(){
   const pat={id:pid,sex,age,ausencias:abs,frecuencia:freq,drug,descripcion:desc||null,descAI:curDescAI||null,fasta:curFasta?curFasta.name:null,fastaSlc6a1:curFasta?curFasta.slc6a1:null,ts:new Date().toISOString()};
   sp(curH.id,pat);
   pushPatientToNode(curH.id, pat);   // ◄ HYBRID MODE: echo to the real hospital if connected
+  sendBeaconAggregate(pat);          // ◄ FEDERATED MODE: send aggregate to coordinator
   const newTot=tot()+1;
   if(isFirst){aev('alert','ALERT: '+curH.name+' adds its FIRST SLC6A1 patient to GenNet');aev('info','COORD → BROADCAST: Node '+curH.code+' operational — welcome to the network');}
   aev('node',curH.code+' → new patient '+pid+' · SLC6A1 · absences='+abs+(freq?' ('+freq+')':''));
