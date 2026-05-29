@@ -329,6 +329,22 @@ async def hospital_logout(hid: str):
     return resp
 
 
+@app.get("/hospital/{hid}/simulator", response_class=HTMLResponse)
+async def hospital_simulator(hid: str, request: Request):
+    """Personalized simulator for the doctor — only their hospital + GenNet."""
+    state = load_state()
+    h = find_hospital_by_id(state, hid)
+    if h is None:
+        return RedirectResponse(url="/", status_code=303)
+    if not h.get("activated"):
+        return RedirectResponse(url=f"/hospital/{hid}", status_code=303)
+    if not is_in_hospital(request, hid):
+        return RedirectResponse(url=f"/hospital/{hid}", status_code=303)
+    return templates.TemplateResponse("hospital_simulator.html", {
+        "request": request, "hospital": h,
+    })
+
+
 # ── API ────────────────────────────────────────────────────────────────────
 @app.get("/api/hospitals")
 async def api_hospitals():
