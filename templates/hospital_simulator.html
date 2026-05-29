@@ -216,7 +216,10 @@ code, .mono { font-family:var(--mono); }
     <span style="opacity:0.7">·</span>
     <span>Dr. {{ hospital.doctor }}</span>
   </div>
-  <div style="display:flex;gap:10px">
+  <div style="display:flex;gap:10px;align-items:center">
+    <button id="btn-view-matches" onclick="scrollToMatches()" style="color:#fff;background:#1ea478;border:1px solid #1ea478;border-radius:6px;padding:5px 12px;font-size:13px;font-family:inherit;cursor:pointer;display:none;align-items:center;gap:7px">
+      View matches <span id="btn-match-count" style="background:#d9534f;color:#fff;border-radius:10px;padding:1px 8px;font-size:11px;font-weight:600;line-height:1.4">0</span>
+    </button>
     <a href="/" style="color:#cfe8dc;text-decoration:none;padding:5px 12px;border:1px solid rgba(255,255,255,0.2);border-radius:6px">← Network</a>
     <a href="/hospital/{{ hospital.id }}/logout" style="color:#fff;text-decoration:none;padding:5px 12px;background:rgba(255,255,255,0.15);border-radius:6px">Sign out</a>
   </div>
@@ -660,11 +663,19 @@ function updateSummary(){
 
 function deletePat(hid,pid){
   const h=HH.find(h=>h.id===hid);
-  if(!confirm('Delete patient '+pid+' from node '+h.name+'?\n\nThis action cannot be undone. The clinical data and FASTA will be erased from the node.')) return;
+  if(!confirm('Delete patient '+pid+' from node '+h.name+'?\n\nThis action cannot be undone. The clinical data and FASTA will be erased from the node, and the aggregate withdrawn from the coordinator.')) return;
   // Remove from patient list
   let ps=gp(hid).filter(p=>p.id!==pid);
   localStorage.setItem('gn3_'+HOSPITAL_ID+'_p_'+hid,JSON.stringify(ps));
   deletePatientFromNode(hid, pid);   // ◄ HYBRID MODE: echo the removal to the real hospital
+  // Also withdraw the federated aggregate from the coordinator
+  fetch('/api/beacon/delete',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    credentials:'same-origin',
+    body: JSON.stringify({hospital_id:HOSPITAL_ID, patient_local_id:pid})
+  }).then(r=>r.json()).then(d=>{
+    if(d && d.ok) aev('coord','GenNet ← '+HOSPITAL_NAME+': aggregate withdrawn for '+pid);
+  }).catch(()=>{});
   // Remove associated analysis if exists
   let ans=gan().filter(a=>a.pid!==pid);
   localStorage.setItem('gn3_'+HOSPITAL_ID+'_an',JSON.stringify(ans));
@@ -953,6 +964,65 @@ function refreshFedOnRender(){ setTimeout(refreshFedPanorama, 80); }
 // ── BEACON AGGREGATE TO COORDINATOR ───────────────────────────
 // Sends only the SHARED fields (variant/effect/exon/phenotype/drug response).
 // Full record stays in localStorage. This is the Beacon-style aggregate.
+// SLC6A1 NM_003042.4 codon math: cDNA pos -> codon number (CDS starts at pos 1)
+function inferCodonFromVariant(v){
+  if(!v) return null;
+  const m = v.match(/c\.(\d+)/);
+  if(!m) return null;
+  const pos = parseInt(m[1],10);
+  return Math.floor((pos - 1) / 3) + 1;
+}
+// SLC6A1 (UniProt P30531, GAT-1) protein domain map by amino-acid residue.
+// IMPORTANT: approximate boundaries — for screening, NOT for diagnosis.
+function inferProteinDomain(v){
+  if(!v) return null;
+  const codon = inferCodonFromVariant(v);
+  if(codon == null) return null;
+  // 599 aa total. 12 transmembrane domains + intracellular loops (IL) and extracellular loops (EL).
+  // Coordinates aligned with UniProt P30531 (approximate, literature-based).
+  const map = [
+    [1,    56,  'N-terminus (cytoplasmic)'],
+    [57,   77,  'TM1'],
+    [78,   88,  'IL1'],
+    [89,  108,  'TM2'],
+    [109, 232,  'EL1 (large extracellular loop)'],
+    [233, 254,  'TM3'],
+    [255, 271,  'IL2'],
+    [272, 290,  'TM4'],
+    [291, 302,  'EL2'],
+    [303, 322,  'TM5'],
+    [323, 345,  'IL3'],
+    [346, 366,  'TM6'],
+    [367, 390,  'EL3'],
+    [391, 411,  'TM7'],
+    [412, 426,  'IL4'],
+    [427, 446,  'TM8'],
+    [447, 478,  'EL4'],
+    [479, 497,  'TM9'],
+    [498, 510,  'IL5'],
+    [511, 530,  'TM10'],
+    [531, 545,  'EL5'],
+    [546, 565,  'TM11'],
+    [566, 575,  'IL6'],
+    [576, 596,  'TM12'],
+    [597, 599,  'C-terminus (cytoplasmic)'],
+  ];
+  for(const [a,b,name] of map){ if(codon>=a && codon<=b) return name; }
+  return null;
+}
+
+function scrollToMatches(){
+  const el = document.getElementById('fed-panorama');
+  if(el){ el.scrollIntoView({behavior:'smooth', block:'start'}); }
+}
+function updateMatchCountBadge(n){
+  const btn = document.getElementById('btn-view-matches');
+  const cnt = document.getElementById('btn-match-count');
+  if(!btn || !cnt) return;
+  if(n > 0){ btn.style.display = 'inline-flex'; cnt.textContent = n; }
+  else { btn.style.display = 'none'; }
+}
+
 // Best-effort inference from cDNA notation (c.NNNN<X>>Y or c.NNNN_NNNN<del/ins/dup>)
 function inferEffectFromVariant(v){
   if(!v) return null;
@@ -995,6 +1065,8 @@ async function sendBeaconAggregate(pat){
     variant_protein:  (pat.descAI && pat.descAI.variant_protein) || null,
     effect_type:      inferEffectFromVariant(pat.variantManual),
     exon:             inferExonFromVariant(pat.variantManual),
+    codon:            inferCodonFromVariant(pat.variantManual),
+    protein_domain:   inferProteinDomain(pat.variantManual),
     phenotype_tag:    inferEffectFromDrug(pat),
     drug_response:    pat.drug || null,
   };
@@ -1025,20 +1097,26 @@ async function checkFederatedMatches(payload){
         variant_cdna: payload.variant_cdna,
         effect_type: payload.effect_type,
         exon: payload.exon,
+        codon: payload.codon,
+        protein_domain: payload.protein_domain,
         phenotype_tag: payload.phenotype_tag,
       }), credentials:'same-origin'
     });
     const m = await r.json();
     if(!m.ok) return;
-    const ex = m.exact_variant||[], se = m.same_exon||[],
-          ef = m.same_effect||[], sp = m.same_phenotype||[];
-    if(ex.length===0 && se.length===0 && ef.length===0 && sp.length===0){
+    const ex = m.exact_variant||[], cd = m.same_codon||[], se = m.same_exon||[],
+          dm = m.same_domain||[], ef = m.same_effect||[], sp = m.same_phenotype||[];
+    const total = ex.length + cd.length + se.length + dm.length + ef.length + sp.length;
+    updateMatchCountBadge(total);
+    if(total===0){
       aev('coord','GenNet: no federated coincidences for this patient (yet)');
       return;
     }
-    showFederatedMatch({ex, se, ef, sp});
+    showFederatedMatch({ex, cd, se, dm, ef, sp});
     if(ex.length) aev('alert','MATCH: variant '+payload.variant_cdna+' also in '+ex.length+' other hospital(s)');
-    if(ef.length) aev('coord','MATCH: same effect_type in '+ef.length+' hospital(s)');
+    if(cd.length) aev('alert','MATCH: same codon · '+cd.length+' other hospital(s)');
+    if(dm.length) aev('coord','MATCH: same protein domain · '+dm.length+' hospital(s)');
+    if(ef.length) aev('coord','MATCH: same effect_type · '+ef.length+' hospital(s)');
   }catch(e){ /* silent — match is opportunistic */ }
 }
 
@@ -1062,9 +1140,14 @@ function showFederatedMatch(m){
     return block;
   };
   h += renderLvl('Exact same variant', m.ex, '#0a5a42', true);
+  h += renderLvl('Same codon', m.cd, '#1ea478', false);
   h += renderLvl('Same exon', m.se, '#1f8a6e', false);
+  h += renderLvl('Same protein domain (approx.)', m.dm, '#5b8a6b', false);
   h += renderLvl('Same effect type', m.ef, '#5e6a85', false);
   h += renderLvl('Same phenotype', m.sp, '#7a5a85', false);
+  if(m.dm && m.dm.length){
+    h += '<div style="margin-top:6px;padding:6px 8px;background:#fff8e1;border:1px solid #ffe082;border-radius:4px;font-size:10px;color:#8a6a00">⚠ Protein-domain mapping is approximate (literature-based for SLC6A1) — for screening only, not for diagnosis.</div>';
+  }
   h += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:10px;color:var(--ink3);font-style:italic">No patient identities exchanged. Counts are derived from Beacon-style aggregates.</div>';
   h += '</div>';
   wrap.innerHTML = h;
