@@ -68,12 +68,17 @@ if USE_DB:
                         variant_protein TEXT,
                         effect_type     TEXT,
                         exon            TEXT,
+                        codon           INTEGER,
+                        protein_domain  TEXT,
                         phenotype_tag   TEXT,
                         drug_response   TEXT,
                         submitted_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         UNIQUE (hospital_id, patient_local_id)
                     )
                 """)
+                # Idempotent ALTER for existing tables (in case the database has the old schema)
+                cur.execute("ALTER TABLE gennet_beacon ADD COLUMN IF NOT EXISTS codon INTEGER")
+                cur.execute("ALTER TABLE gennet_beacon ADD COLUMN IF NOT EXISTS protein_domain TEXT")
                 cur.execute("""
                     CREATE INDEX IF NOT EXISTS idx_beacon_hospital ON gennet_beacon(hospital_id);
                 """)
@@ -108,13 +113,15 @@ if USE_DB:
                 cur.execute("""
                     INSERT INTO gennet_beacon
                         (hospital_id, patient_local_id, variant_cdna, variant_protein,
-                         effect_type, exon, phenotype_tag, drug_response)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                         effect_type, exon, codon, protein_domain, phenotype_tag, drug_response)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (hospital_id, patient_local_id) DO UPDATE SET
                         variant_cdna    = EXCLUDED.variant_cdna,
                         variant_protein = EXCLUDED.variant_protein,
                         effect_type     = EXCLUDED.effect_type,
                         exon            = EXCLUDED.exon,
+                        codon           = EXCLUDED.codon,
+                        protein_domain  = EXCLUDED.protein_domain,
                         phenotype_tag   = EXCLUDED.phenotype_tag,
                         drug_response   = EXCLUDED.drug_response,
                         submitted_at    = NOW()
@@ -126,6 +133,8 @@ if USE_DB:
                     payload.get("variant_protein"),
                     payload.get("effect_type"),
                     payload.get("exon"),
+                    payload.get("codon"),
+                    payload.get("protein_domain"),
                     payload.get("phenotype_tag"),
                     payload.get("drug_response"),
                 ))
@@ -178,12 +187,12 @@ if USE_DB:
 
     def beacon_match(query_hospital_id: str, variant_cdna: str = None,
                      effect_type: str = None, exon: str = None,
+                     codon: int = None, protein_domain: str = None,
                      phenotype_tag: str = None) -> dict:
         """Find coincidences in OTHER hospitals for a given query.
-        Returns matches by levels (exact variant > same exon > same effect > same phenotype).
-        Never returns patient identities, only counts and hospital names.
+        Returns matches by levels. Never returns patient identities, only counts and hospital names.
         """
-        levels = {"exact_variant": [], "same_exon": [], "same_effect": [], "same_phenotype": []}
+        levels = {"exact_variant": [], "same_codon": [], "same_exon": [], "same_domain": [], "same_effect": [], "same_phenotype": []}
         with psycopg.connect(_DB_URL) as conn:
             with conn.cursor() as cur:
                 if variant_cdna:
@@ -217,6 +226,24 @@ if USE_DB:
                         GROUP BY b.hospital_id ORDER BY c DESC
                     """, (effect_type, query_hospital_id))
                     levels["same_effect"] = [{"hospital_id": r[0], "count": r[1]} for r in cur.fetchall()]
+                if codon is not None:
+                    cur.execute("""
+                        SELECT b.hospital_id, COUNT(*) c
+                        FROM gennet_beacon b
+                        WHERE b.codon = %s AND b.hospital_id <> %s
+                          AND (b.variant_cdna IS NULL OR b.variant_cdna <> COALESCE(%s,''))
+                        GROUP BY b.hospital_id ORDER BY c DESC
+                    """, (codon, query_hospital_id, variant_cdna))
+                    levels["same_codon"] = [{"hospital_id": r[0], "count": r[1]} for r in cur.fetchall()]
+                if protein_domain:
+                    cur.execute("""
+                        SELECT b.hospital_id, COUNT(*) c
+                        FROM gennet_beacon b
+                        WHERE b.protein_domain = %s AND b.hospital_id <> %s
+                          AND (b.variant_cdna IS NULL OR b.variant_cdna <> COALESCE(%s,''))
+                        GROUP BY b.hospital_id ORDER BY c DESC
+                    """, (protein_domain, query_hospital_id, variant_cdna))
+                    levels["same_domain"] = [{"hospital_id": r[0], "count": r[1]} for r in cur.fetchall()]
                 if phenotype_tag:
                     cur.execute("""
                         SELECT b.hospital_id, COUNT(*) c
@@ -274,6 +301,8 @@ else:
                 "variant_protein": payload.get("variant_protein"),
                 "effect_type": payload.get("effect_type"),
                 "exon": payload.get("exon"),
+                "codon": payload.get("codon"),
+                "protein_domain": payload.get("protein_domain"),
                 "phenotype_tag": payload.get("phenotype_tag"),
                 "drug_response": payload.get("drug_response"),
                 "submitted_at": now_iso(),
@@ -317,11 +346,12 @@ else:
 
     def beacon_match(query_hospital_id: str, variant_cdna: str = None,
                      effect_type: str = None, exon: str = None,
+                     codon: int = None, protein_domain: str = None,
                      phenotype_tag: str = None) -> dict:
         items = _load_beacon_list()
         others = [x for x in items if x["hospital_id"] != query_hospital_id]
         from collections import defaultdict, Counter
-        levels = {"exact_variant": [], "same_exon": [], "same_effect": [], "same_phenotype": []}
+        levels = {"exact_variant": [], "same_codon": [], "same_exon": [], "same_domain": [], "same_effect": [], "same_phenotype": []}
 
         if variant_cdna:
             byh = defaultdict(lambda: {"count": 0, "drug_responses": set(), "phenotypes": set()})
@@ -341,6 +371,18 @@ else:
                           if x.get("exon") == exon
                           and (not variant_cdna or x.get("variant_cdna") != variant_cdna))
             levels["same_exon"] = [{"hospital_id": h, "count": c} for h, c in byh.most_common()]
+
+        if codon is not None:
+            byh = Counter(x["hospital_id"] for x in others
+                          if x.get("codon") == codon
+                          and (not variant_cdna or x.get("variant_cdna") != variant_cdna))
+            levels["same_codon"] = [{"hospital_id": h, "count": c} for h, c in byh.most_common()]
+
+        if protein_domain:
+            byh = Counter(x["hospital_id"] for x in others
+                          if x.get("protein_domain") == protein_domain
+                          and (not variant_cdna or x.get("variant_cdna") != variant_cdna))
+            levels["same_domain"] = [{"hospital_id": h, "count": c} for h, c in byh.most_common()]
 
         if effect_type:
             byh = Counter(x["hospital_id"] for x in others if x.get("effect_type") == effect_type)
@@ -372,7 +414,7 @@ def find_hospital_by_id(state: dict, hid: str) -> Optional[dict]:
 
 
 # ── App ────────────────────────────────────────────────────────────────────
-app = FastAPI(title="GenNet — Level 2", version="0.4.0")
+app = FastAPI(title="GenNet — Level 2", version="0.4.1")
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -622,7 +664,7 @@ async def health():
     return {
         "status": "ok",
         "service": "GenNet Coordinator",
-        "version": "0.4.0",
+        "version": "0.4.1",
         "storage": "postgres" if USE_DB else "json-file",
     }
 
@@ -642,12 +684,19 @@ async def api_beacon_submit(request: Request):
     state = load_state()
     if find_hospital_by_id(state, hid) is None:
         return JSONResponse({"ok": False, "error": "unknown_hospital"}, status_code=404)
+    codon_val = body.get("codon")
+    try:
+        codon_val = int(codon_val) if codon_val is not None and str(codon_val).strip() != "" else None
+    except Exception:
+        codon_val = None
     payload = {
         "patient_local_id": str(body.get("patient_local_id", "")).strip()[:64],
         "variant_cdna":     (body.get("variant_cdna") or "").strip()[:200] or None,
         "variant_protein":  (body.get("variant_protein") or "").strip()[:200] or None,
         "effect_type":      (body.get("effect_type") or "").strip()[:60] or None,
         "exon":             (body.get("exon") or "").strip()[:20] or None,
+        "codon":            codon_val,
+        "protein_domain":   (body.get("protein_domain") or "").strip()[:80] or None,
         "phenotype_tag":    (body.get("phenotype_tag") or "").strip()[:80] or None,
         "drug_response":    (body.get("drug_response") or "").strip()[:80] or None,
     }
@@ -692,11 +741,18 @@ async def api_beacon_match(request: Request):
     hid = body.get("hospital_id", "")
     if not is_in_hospital(request, hid):
         return JSONResponse({"ok": False, "error": "not_logged_in_to_hospital"}, status_code=403)
+    codon_val = body.get("codon")
+    try:
+        codon_val = int(codon_val) if codon_val is not None and str(codon_val).strip() != "" else None
+    except Exception:
+        codon_val = None
     raw = beacon_match(
         query_hospital_id=hid,
         variant_cdna=(body.get("variant_cdna") or "").strip() or None,
         effect_type=(body.get("effect_type") or "").strip() or None,
         exon=(body.get("exon") or "").strip() or None,
+        codon=codon_val,
+        protein_domain=(body.get("protein_domain") or "").strip() or None,
         phenotype_tag=(body.get("phenotype_tag") or "").strip() or None,
     )
     # Enrich with hospital display names (no patient identities here)
@@ -713,7 +769,9 @@ async def api_beacon_match(request: Request):
         "ok": True,
         "query_hospital_id": hid,
         "exact_variant":  enrich(raw["exact_variant"]),
+        "same_codon":     enrich(raw.get("same_codon", [])),
         "same_exon":      enrich(raw["same_exon"]),
+        "same_domain":    enrich(raw.get("same_domain", [])),
         "same_effect":    enrich(raw["same_effect"]),
         "same_phenotype": enrich(raw["same_phenotype"]),
     })
