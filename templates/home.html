@@ -31,10 +31,12 @@
   width:120px;height:120px;border-radius:50%;
   background:radial-gradient(circle at 30% 30%, #1a9b75 0%, var(--teal) 45%, var(--teal-deep) 100%);
   display:flex;align-items:center;justify-content:center;flex-direction:column;
-  color:#fff;text-align:center;z-index:5;
+  color:#fff;text-align:center;z-index:5;text-decoration:none;cursor:pointer;
   box-shadow:0 0 0 8px rgba(15,122,90,0.12), 0 0 0 18px rgba(15,122,90,0.06), 0 12px 36px rgba(15,122,90,0.35);
   animation:breathe 4s ease-in-out infinite;
+  transition:transform .25s ease;
 }
+.coord-star:hover{transform:translate(-50%,-50%) scale(1.04)}
 @keyframes breathe{0%,100%{box-shadow:0 0 0 8px rgba(15,122,90,0.12), 0 0 0 18px rgba(15,122,90,0.06), 0 12px 36px rgba(15,122,90,0.35)}50%{box-shadow:0 0 0 10px rgba(15,122,90,0.18), 0 0 0 24px rgba(15,122,90,0.08), 0 14px 40px rgba(15,122,90,0.4)}}
 .coord-star .ttl{font-family:var(--display);font-weight:600;font-size:14px;line-height:1.15;padding:0 8px}
 .coord-star .sub{font-size:9px;font-family:var(--mono);opacity:.85;margin-top:5px;letter-spacing:1px;text-transform:uppercase}
@@ -96,10 +98,10 @@
 
   {% if approved %}
   <div class="constellation" id="constellation">
-    <div class="coord-star">
+    <a class="coord-star" href="/coordinator" title="Open the coordinator's federated view">
       <div class="ttl">Central<br>Coordinator</div>
       <div class="sub">GenNet</div>
-    </div>
+    </a>
     {% for h in approved %}
     <a class="hosp-star" href="/hospital/{{ h.id }}" data-index="{{ loop.index0 }}" title="{{ h.hospital }}{% if h.city %} — {{ h.city }}{% endif %} · click to enter">
       <div class="hosp-dot"></div>
