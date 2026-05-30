@@ -743,6 +743,7 @@ function openF(hid){
   document.getElementById('fi').value='';document.getElementById('frow').style.display='none';document.getElementById('ferr').style.display='none';
   document.getElementById('fdesc').value='';
   document.getElementById('fvariant').value='';
+  const oldHint = document.getElementById('fvariant-hint'); if(oldHint) oldHint.remove();
   const dab=document.getElementById('desc-ai-box');dab.style.display='none';dab.innerHTML='';
   document.getElementById('desc-ai-btn').disabled=false;document.getElementById('desc-ai-btn').textContent='🔍 Interpretar con IA';
   curDescAI=null;
@@ -837,8 +838,18 @@ function renderDescAI(d){
 const SLC6A1_ACCESSIONS=['NM_003042','NM_003042.4','NG_012988','SLC6A1','GAT1','GAT-1','GABA','SLC6','6A1'];
 const SLC6A1_KNOWN_POS=[256,368,432,446,500,544,593,598,671,689,752,755,779,794,812,847,863,906,910,938,1024,1066,1069,1070,1091,1126,1171,1198,1225,1270,1361,1366,1396,1451,1514,1651];
 
+// Try to extract a cDNA variant notation (c.NNN<X>>Y) from FASTA header or filename.
+// Returns the matched string (e.g. "c.889C>T") or null.
+function extractVariantFromHeader(text, filename){
+  const haystack = (text + ' ' + filename);
+  // cDNA pattern: c.<number><nucleotide(s)>><nucleotide(s)>  e.g. c.889C>T  c.890_891delAG
+  const cdnaMatch = haystack.match(/c\.\d+[A-Z]*(?:>[A-Z]+|_\d+(?:del|ins|dup)[A-Z]*)/i);
+  if(cdnaMatch) return cdnaMatch[0].replace(/^c\./i, 'c.');
+  return null;
+}
+
 function validateFasta(text,filename){
-  // result: {valid:bool, slc6a1:bool, warning:bool, msg:string, stats:{}}
+  // result: {valid:bool, slc6a1:bool, warning:bool, variant:string|null, msg:string, stats:{}}
   const lines=text.split(/\r?\n/).filter(function(l){return l.trim()!=='';});
   if(!lines.length) return{valid:false,msg:'Empty file.'};
 
@@ -878,13 +889,13 @@ function validateFasta(text,filename){
 
   if(slc6a1Score>=3){
     return{valid:true,slc6a1:true,warning:false,
-      msg:`✓ Valid FASTA · SLC6A1 detected · ${seq.length.toLocaleString()} bp · GC: ${gc}% · ${headers.length} sequence${headers.length>1?'s':''}`,stats};
+      msg:`✓ Valid FASTA · SLC6A1 detected · ${seq.length.toLocaleString()} bp · GC: ${gc}% · ${headers.length} sequence${headers.length>1?'s':''}`,stats,variant:extractVariantFromHeader(headerText, filename)};
   } else if(slc6a1Score>=1){
     return{valid:true,slc6a1:true,warning:true,
-      msg:`⚠ Valid FASTA but SLC6A1 could not be confirmed with certainty. Check the header (it should include "SLC6A1" or "NM_003042"). Sequence accepted with a warning. ${seq.length.toLocaleString()} bp · GC: ${gc}%`,stats};
+      msg:`⚠ Valid FASTA but SLC6A1 could not be confirmed with certainty. Check the header (it should include "SLC6A1" or "NM_003042"). Sequence accepted with a warning. ${seq.length.toLocaleString()} bp · GC: ${gc}%`,stats,variant:extractVariantFromHeader(headerText, filename)};
   } else {
     return{valid:true,slc6a1:false,warning:true,
-      msg:`⚠ Structurally valid FASTA (${seq.length.toLocaleString()} bp, GC: ${gc}%) but the header does NOT mention SLC6A1 or NM_003042. You can continue, but verify it is the correct sequence.`,stats};
+      msg:`⚠ Structurally valid FASTA (${seq.length.toLocaleString()} bp, GC: ${gc}%) but the header does NOT mention SLC6A1 or NM_003042. You can continue, but verify it is the correct sequence.`,stats,variant:extractVariantFromHeader(headerText, filename)};
   }
 }
 
@@ -913,14 +924,16 @@ function handleFasta(inp){
       inp.value='';
     } else if(result.warning){
       // Soft warning: accepted but flagged
-      curFasta={name:f.name,size:f.size,valid:true,slc6a1:result.slc6a1,stats:result.stats};
+      curFasta={name:f.name,size:f.size,valid:true,slc6a1:result.slc6a1,stats:result.stats,variant:result.variant||null};
       document.getElementById('fasta-warn').textContent=result.msg;
       document.getElementById('fasta-warn').style.display='block';
+      if(result.variant) prefillVariantFromFasta(result.variant);
     } else {
       // All good
-      curFasta={name:f.name,size:f.size,valid:true,slc6a1:true,stats:result.stats};
+      curFasta={name:f.name,size:f.size,valid:true,slc6a1:true,stats:result.stats,variant:result.variant||null};
       document.getElementById('fasta-ok').textContent=result.msg;
       document.getElementById('fasta-ok').style.display='block';
+      if(result.variant) prefillVariantFromFasta(result.variant);
     }
   };
   reader.onerror=()=>{
@@ -1009,6 +1022,28 @@ function inferProteinDomain(v){
   ];
   for(const [a,b,name] of map){ if(codon>=a && codon<=b) return name; }
   return null;
+}
+
+function prefillVariantFromFasta(variant){
+  const fv = document.getElementById('fvariant');
+  if(!fv) return;
+  // Only fill if the field is empty — don't overwrite what the doctor typed
+  if(fv.value.trim() === ''){
+    fv.value = variant;
+    // Brief visual cue
+    fv.style.background = '#fff8e1';
+    fv.style.transition = 'background 1.5s';
+    setTimeout(function(){ fv.style.background = '#f7fbff'; }, 1500);
+    // Drop a tiny hint next to it
+    let hint = document.getElementById('fvariant-hint');
+    if(!hint){
+      hint = document.createElement('div');
+      hint.id = 'fvariant-hint';
+      hint.style.cssText = 'font-size:10px;color:#0a5a42;margin-top:3px;font-style:italic';
+      fv.parentNode.appendChild(hint);
+    }
+    hint.textContent = '↑ pre-filled from FASTA header';
+  }
 }
 
 function scrollToMatches(){
@@ -1153,6 +1188,14 @@ function showFederatedMatch(m){
   wrap.innerHTML = h;
   document.body.appendChild(wrap);
 }
+function showNoVariantWarning(){
+  const t = document.createElement('div');
+  t.style.cssText = 'position:fixed;bottom:24px;left:24px;z-index:9998;padding:13px 18px;border-radius:var(--radius);font-size:13px;font-family:var(--sans);box-shadow:0 4px 14px rgba(0,0,0,0.15);max-width:380px;line-height:1.5;background:#fff8e1;border:1px solid #ffe082;color:#8a6a00;';
+  t.innerHTML = '<b>⚠ Saved without variant.</b><br>This patient was added to your hospital, but no cDNA variant was entered. The federated network <b>cannot find coincidences</b> for this patient yet. You can edit the patient later to add the variant.';
+  document.body.appendChild(t);
+  setTimeout(function(){ t.style.transition='opacity .5s'; t.style.opacity='0'; setTimeout(function(){t.remove();},500); }, 6500);
+}
+
 function showBeaconToast(ok, errMsg){
   const t = document.createElement('div');
   t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;padding:13px 18px;border-radius:var(--radius);font-size:13px;font-family:var(--sans);box-shadow:0 4px 14px rgba(0,0,0,0.15);max-width:380px;line-height:1.5;'
@@ -1176,6 +1219,10 @@ function submitF(){
   sp(curH.id,pat);
   pushPatientToNode(curH.id, pat);   // ◄ HYBRID MODE: echo to the real hospital if connected
   sendBeaconAggregate(pat);          // ◄ FEDERATED MODE: send aggregate to coordinator
+  // Warn if patient was saved without variant info — they won't participate in federated matching
+  if(!variantManual && !(curDescAI && curDescAI.variant_cdna)){
+    showNoVariantWarning();
+  }
   const newTot=tot()+1;
   if(isFirst){aev('alert','ALERT: '+curH.name+' adds its FIRST SLC6A1 patient to GenNet');aev('info','COORD → BROADCAST: Node '+curH.code+' operational — welcome to the network');}
   aev('node',curH.code+' → new patient '+pid+' · SLC6A1 · absences='+abs+(freq?' ('+freq+')':''));
