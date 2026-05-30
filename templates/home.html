@@ -41,6 +41,8 @@
 .coord-star .ttl{font-family:var(--display);font-weight:600;font-size:14px;line-height:1.15;padding:0 8px}
 .coord-star .sub{font-size:9px;font-family:var(--mono);opacity:.85;margin-top:5px;letter-spacing:1px;text-transform:uppercase}
 
+.hosp-badge{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;background:var(--teal);color:#fff;font-family:var(--display);font-weight:600;font-size:11px;border-radius:5px;margin-right:6px;line-height:1;letter-spacing:0;vertical-align:middle}
+
 .hosp-star{
   position:absolute;text-decoration:none;
   display:flex;flex-direction:column;align-items:center;
@@ -105,7 +107,7 @@
     {% for h in approved %}
     <a class="hosp-star" href="/hospital/{{ h.id }}" data-index="{{ loop.index0 }}" title="{{ h.hospital }}{% if h.city %} — {{ h.city }}{% endif %} · click to enter">
       <div class="hosp-dot"></div>
-      <div class="hosp-name">{{ h.hospital }}</div>
+      <div class="hosp-name"><span class="hosp-badge">H</span>{{ h.hospital }}</div>
     </a>
     {% endfor %}
   </div>
@@ -118,7 +120,6 @@
 
   <div class="cta-row">
     <a href="/join" class="btn">Join the network →</a>
-    <a href="/demo" class="btn btn-ghost">How it works</a>
   </div>
 </div>
 
