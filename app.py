@@ -464,7 +464,7 @@ def find_hospital_by_id(state: dict, hid: str) -> Optional[dict]:
 
 
 # ── App ────────────────────────────────────────────────────────────────────
-app = FastAPI(title="GenNet — Level 2", version="0.4.3")
+app = FastAPI(title="GenNet — Level 2", version="0.4.4")
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -719,7 +719,7 @@ async def health():
     return {
         "status": "ok",
         "service": "GenNet Coordinator",
-        "version": "0.4.3",
+        "version": "0.4.4",
         "storage": "postgres" if USE_DB else "json-file",
     }
 
