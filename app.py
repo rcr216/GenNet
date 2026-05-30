@@ -464,7 +464,7 @@ def find_hospital_by_id(state: dict, hid: str) -> Optional[dict]:
 
 
 # ── App ────────────────────────────────────────────────────────────────────
-app = FastAPI(title="GenNet — Level 2", version="0.5.0")
+app = FastAPI(title="GenNet — Level 2", version="0.5.1")
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -719,7 +719,7 @@ async def health():
     return {
         "status": "ok",
         "service": "GenNet Coordinator",
-        "version": "0.5.0",
+        "version": "0.5.1",
         "storage": "postgres" if USE_DB else "json-file",
     }
 
@@ -797,6 +797,12 @@ async def admin_wipe_aggregates(request: Request):
         return RedirectResponse(url="/admin/login", status_code=303)
     n = beacon_wipe_all()
     return RedirectResponse(url=f"/admin?wiped={n}", status_code=303)
+
+
+@app.get("/demo", response_class=HTMLResponse)
+async def demo_page(request: Request):
+    """Public page explaining how GenNet works (4-step animated overview)."""
+    return templates.TemplateResponse("demo.html", {"request": request})
 
 
 @app.get("/coordinator", response_class=HTMLResponse)
