@@ -203,6 +203,14 @@ if USE_DB:
                     cur.execute("DELETE FROM gennet_beacon WHERE hospital_id <> ALL(%s)", (ids,))
                 return cur.rowcount
 
+    def beacon_wipe_all() -> int:
+        with psycopg.connect(_DB_URL, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM gennet_beacon")
+                n = cur.fetchone()[0]
+                cur.execute("DELETE FROM gennet_beacon")
+                return n
+
     def beacon_match(query_hospital_id: str, variant_cdna: str = None,
                      effect_type: str = None, exon: str = None,
                      codon: int = None, protein_domain: str = None,
@@ -379,6 +387,13 @@ else:
             _save_beacon_list(new)
             return removed
 
+    def beacon_wipe_all() -> int:
+        with state_lock:
+            items = _load_beacon_list()
+            n = len(items)
+            _save_beacon_list([])
+            return n
+
     def beacon_match(query_hospital_id: str, variant_cdna: str = None,
                      effect_type: str = None, exon: str = None,
                      codon: int = None, protein_domain: str = None,
@@ -449,7 +464,7 @@ def find_hospital_by_id(state: dict, hid: str) -> Optional[dict]:
 
 
 # ── App ────────────────────────────────────────────────────────────────────
-app = FastAPI(title="GenNet — Level 2", version="0.4.2")
+app = FastAPI(title="GenNet — Level 2", version="0.4.3")
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -704,7 +719,7 @@ async def health():
     return {
         "status": "ok",
         "service": "GenNet Coordinator",
-        "version": "0.4.2",
+        "version": "0.4.3",
         "storage": "postgres" if USE_DB else "json-file",
     }
 
@@ -771,6 +786,17 @@ async def admin_purge_orphans(request: Request):
     valid = [h["id"] for h in state["approved"]]
     removed = beacon_purge_orphans(valid)
     return RedirectResponse(url=f"/admin?purged={removed}", status_code=303)
+
+
+@app.post("/admin/wipe-aggregates")
+async def admin_wipe_aggregates(request: Request):
+    """Delete ALL aggregates. Useful when resetting the demo after testing.
+    Does NOT delete hospitals — only their federated aggregates.
+    """
+    if not is_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+    n = beacon_wipe_all()
+    return RedirectResponse(url=f"/admin?wiped={n}", status_code=303)
 
 
 @app.get("/api/beacon/stats")
