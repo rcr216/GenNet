@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}How GenNet works · Demo{% endblock %}
+
+{% block extra_css %}
+.demo-head{margin-bottom:24px}
+.step-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 26px;margin-bottom:14px;display:flex;gap:22px;align-items:flex-start}
+.step-num{flex-shrink:0;width:34px;height:34px;border-radius:50%;background:var(--teal-bg);color:var(--teal-deep);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px;font-family:var(--display)}
+.step-body{flex:1;min-width:0}
+.step-body h3{font-family:var(--display);font-size:18px;margin:0 0 4px;color:var(--ink)}
+.step-body .step-sub{font-size:13px;color:var(--ink3);margin:0 0 14px;max-width:60ch}
+.step-svg{width:100%;max-width:460px;display:block}
+.step-svg text{font-family:var(--sans);fill:var(--ink)}
+.two-cards{display:flex;gap:12px;max-width:460px}
+.card-mini{flex:1;background:var(--paper2);border-radius:8px;padding:10px 14px}
+.card-mini-h{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--ink3);margin-bottom:4px}
+.card-mini-b{font-family:var(--mono);font-size:12px;color:var(--ink);line-height:1.5}
+.match-card{background:var(--paper2);border-radius:8px;padding:10px 14px;font-size:13px;max-width:460px;display:flex;align-items:center;gap:10px}
+.match-card .ic{width:24px;height:24px;border-radius:50%;background:#fff8e1;color:#b8791a;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.match-card .mono{font-family:var(--mono)}
+.demo-cta{display:flex;gap:12px;margin-top:24px;flex-wrap:wrap}
+.honest{background:#eaf2fa;border:1px solid #b9d2e6;color:#28568a;padding:10px 16px;border-radius:10px;font-size:13px;margin-top:18px;display:flex;gap:10px;align-items:flex-start}
+.honest .ico{font-size:18px;line-height:1}
+@media (max-width:720px){
+  .step-card{flex-direction:column;gap:14px}
+  .two-cards{flex-direction:column}
+}
+{% endblock %}
+
+{% block content %}
+<div class="demo-head">
+  <div class="tag">How it works</div>
+  <h1>How GenNet works</h1>
+  <p class="lede">A federated network for rare-disease genomic intelligence. Each hospital keeps its patient records. Only aggregate counts travel — never the patient.</p>
+</div>
+
+<div class="step-card">
+  <div class="step-num">1</div>
+  <div class="step-body">
+    <h3>Hospitals join the network</h3>
+    <p class="step-sub">A doctor requests to join. The admin approves. The hospital appears on the map and the doctor gets a private space.</p>
+    <svg class="step-svg" viewBox="0 0 460 120" role="img">
+      <title>Hospitals connecting to the coordinator</title>
+      <line x1="60" y1="85" x2="230" y2="35" stroke="#9FE1CB" stroke-width="1.5"/>
+      <line x1="230" y1="85" x2="230" y2="35" stroke="#9FE1CB" stroke-width="1.5"/>
+      <line x1="400" y1="85" x2="230" y2="35" stroke="#9FE1CB" stroke-width="1.5"/>
+      <circle cx="230" cy="35" r="22" fill="var(--teal)" stroke="var(--teal-deep)" stroke-width="0.5"/>
+      <text x="230" y="32" text-anchor="middle" font-size="10" font-weight="600" fill="#fff">GenNet</text>
+      <text x="230" y="44" text-anchor="middle" font-size="8" fill="#fff" opacity="0.85">coordinator</text>
+      <circle cx="60"  cy="85" r="14" fill="var(--teal-bg)" stroke="var(--teal)" stroke-width="1"/>
+      <text x="60"  y="110" text-anchor="middle" font-size="11">Almería</text>
+      <circle cx="230" cy="85" r="14" fill="var(--teal-bg)" stroke="var(--teal)" stroke-width="1"/>
+      <text x="230" y="110" text-anchor="middle" font-size="11">Madrid</text>
+      <circle cx="400" cy="85" r="14" fill="var(--teal-bg)" stroke="var(--teal)" stroke-width="1"/>
+      <text x="400" y="110" text-anchor="middle" font-size="11">Sevilla</text>
+    </svg>
+  </div>
+</div>
+
+<div class="step-card">
+  <div class="step-num">2</div>
+  <div class="step-body">
+    <h3>Each hospital adds patients privately</h3>
+    <p class="step-sub">Full patient records — variant, phenotype, drug response, clinical notes — stay inside the hospital's own simulator. Like the real system: each hospital's data lives on its own server.</p>
+    <div class="two-cards">
+      <div class="card-mini">
+        <div class="card-mini-h">Hospital A · private</div>
+        <div class="card-mini-b">Patient #001<br>c.889C&gt;T<br>Valproate response</div>
+      </div>
+      <div class="card-mini">
+        <div class="card-mini-h">Hospital B · private</div>
+        <div class="card-mini-b">Patient #007<br>c.889C&gt;T<br>Valproate response</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="step-card">
+  <div class="step-num">3</div>
+  <div class="step-body">
+    <h3>Only the aggregate travels</h3>
+    <p class="step-sub">When a patient is registered, a Beacon-style aggregate is sent to the coordinator — variant, effect, exon, phenotype, drug response. No patient identity. No demographics. No clinical notes.</p>
+    <svg class="step-svg" viewBox="0 0 460 80" role="img">
+      <title>Aggregate flow from hospital to coordinator</title>
+      <rect x="0" y="20" width="160" height="40" rx="6" fill="var(--teal-bg)" stroke="var(--teal)" stroke-width="0.7"/>
+      <text x="80" y="38" text-anchor="middle" font-size="11" font-weight="600" fill="var(--teal-deep)">Patient record</text>
+      <text x="80" y="52" text-anchor="middle" font-size="9" fill="var(--teal-deep)">stays in hospital</text>
+      <text x="230" y="36" text-anchor="middle" font-size="10" fill="var(--ink3)">aggregate</text>
+      <text x="230" y="50" text-anchor="middle" font-size="10" fill="var(--ink3)">only</text>
+      <line x1="170" y1="40" x2="290" y2="40" stroke="var(--ink3)" stroke-width="1" stroke-dasharray="3,3"/>
+      <polygon points="285,36 295,40 285,44" fill="var(--ink3)"/>
+      <rect x="300" y="20" width="160" height="40" rx="6" fill="#efece2" stroke="var(--ink3)" stroke-width="0.7"/>
+      <text x="380" y="38" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)">Coordinator</text>
+      <text x="380" y="52" text-anchor="middle" font-size="9" fill="var(--ink2)">receives counts</text>
+    </svg>
+  </div>
+</div>
+
+<div class="step-card">
+  <div class="step-num">4</div>
+  <div class="step-body">
+    <h3>Coincidences emerge across the network</h3>
+    <p class="step-sub">The coordinator finds matches in 6 levels: exact variant · same codon · same exon · same protein domain · same effect type · same phenotype. Doctors see <i>which hospitals</i> share a finding, never <i>which patients</i>.</p>
+    <div class="match-card">
+      <div class="ic">⚡</div>
+      <div><b>Match found:</b> <span class="mono">c.889C&gt;T</span> is also present in <b>2 other hospitals</b> · 3 patients · Valproate response</div>
+    </div>
+  </div>
+</div>
+
+<div class="honest">
+  <span class="ico">🛡️</span>
+  <div><b>Proof of concept · synthetic data.</b> This page describes the architecture of GenNet. The system is live: when a hospital is approved, the data flow shown here is exactly what happens. In production deployment, the patient records would never leave each hospital's own server.</div>
+</div>
+
+<div class="demo-cta">
+  <a href="/coordinator" class="btn">View the live coordinator →</a>
+  <a href="/" class="btn btn-ghost">Back to network</a>
+</div>
+
+{% endblock %}
