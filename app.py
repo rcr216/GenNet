@@ -464,7 +464,7 @@ def find_hospital_by_id(state: dict, hid: str) -> Optional[dict]:
 
 
 # ── App ────────────────────────────────────────────────────────────────────
-app = FastAPI(title="GenNet — Level 2", version="0.4.4")
+app = FastAPI(title="GenNet — Level 2", version="0.5.0")
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -719,7 +719,7 @@ async def health():
     return {
         "status": "ok",
         "service": "GenNet Coordinator",
-        "version": "0.4.4",
+        "version": "0.5.0",
         "storage": "postgres" if USE_DB else "json-file",
     }
 
@@ -797,6 +797,68 @@ async def admin_wipe_aggregates(request: Request):
         return RedirectResponse(url="/admin/login", status_code=303)
     n = beacon_wipe_all()
     return RedirectResponse(url=f"/admin?wiped={n}", status_code=303)
+
+
+@app.get("/coordinator", response_class=HTMLResponse)
+async def coordinator_page(request: Request):
+    """Public page showing the coordinator's federated view (Beacon-style)."""
+    return templates.TemplateResponse("coordinator.html", {"request": request})
+
+
+@app.get("/api/beacon/last-activity")
+async def api_beacon_last_activity():
+    """Returns the timestamp of the most recent aggregate submission."""
+    if USE_DB:
+        with psycopg.connect(_DB_URL) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT MAX(submitted_at) FROM gennet_beacon")
+                row = cur.fetchone()
+                last = row[0] if row else None
+                if last is None:
+                    return JSONResponse({"empty": True})
+                return JSONResponse({"last": last.isoformat()})
+    else:
+        items = _load_beacon_list()
+        if not items:
+            return JSONResponse({"empty": True})
+        return JSONResponse({"last": max(x.get("submitted_at", "") for x in items)})
+
+
+@app.get("/api/beacon/pairs")
+async def api_beacon_pairs():
+    """For the network map: for each pair of hospitals, how many variants they share."""
+    if USE_DB:
+        with psycopg.connect(_DB_URL) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT variant_cdna, array_agg(DISTINCT hospital_id)
+                    FROM gennet_beacon
+                    WHERE variant_cdna IS NOT NULL
+                    GROUP BY variant_cdna
+                    HAVING COUNT(DISTINCT hospital_id) >= 2
+                """)
+                rows = cur.fetchall()
+                variants_hosp = [(v, list(hs)) for v, hs in rows]
+    else:
+        items = _load_beacon_list()
+        from collections import defaultdict
+        by_var = defaultdict(set)
+        for x in items:
+            v = x.get("variant_cdna")
+            if v:
+                by_var[v].add(x["hospital_id"])
+        variants_hosp = [(v, list(hs)) for v, hs in by_var.items() if len(hs) >= 2]
+
+    # Build pair counts
+    from collections import Counter
+    pairs = Counter()
+    for v, hs in variants_hosp:
+        for i in range(len(hs)):
+            for j in range(i + 1, len(hs)):
+                a, b = hs[i], hs[j]
+                key = (a + "|" + b) if a < b else (b + "|" + a)
+                pairs[key] += 1
+    return JSONResponse({"pairs": dict(pairs)})
 
 
 @app.get("/api/beacon/stats")
