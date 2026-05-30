@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% block title %}Coordinator · GenNet{% endblock %}
+
+{% block extra_css %}
+.coord-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap;margin-bottom:18px}
+.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.metric{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.metric-l{font-size:10px;text-transform:uppercase;letter-spacing:1.2px;color:var(--ink3);font-weight:600;margin-bottom:4px}
+.metric-v{font-size:26px;font-weight:600;color:var(--ink);font-family:var(--display)}
+.metric-v.small{font-size:15px;font-weight:500;font-family:var(--sans);margin-top:4px}
+.panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 24px;margin-bottom:18px}
+.panel h3{font-family:var(--display);font-size:18px;margin:0 0 8px;color:var(--ink)}
+.panel .panel-sub{font-size:13px;color:var(--ink3);margin:0 0 14px}
+.coinc-row{display:flex;justify-content:space-between;align-items:center;background:var(--paper2);border-radius:8px;padding:10px 14px;margin-bottom:6px}
+.coinc-row:last-child{margin-bottom:0}
+.coinc-var{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--ink)}
+.coinc-meta{font-size:12px;color:var(--ink3);margin-left:10px}
+.coinc-count{font-size:12px;color:var(--ink2);white-space:nowrap}
+.dist-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px}
+.dist-block .dist-title{font-weight:600;font-size:13px;color:var(--ink);margin-bottom:8px}
+.dist-row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}
+.dist-row:last-child{border-bottom:0}
+.dist-key{font-family:var(--mono);color:var(--ink)}
+.dist-val{color:var(--ink3)}
+.honest-note{background:#eaf2fa;border:1px solid #b9d2e6;color:#28568a;padding:10px 16px;border-radius:10px;font-size:13px;display:flex;gap:10px;align-items:flex-start}
+.honest-note .check{font-size:18px;margin-top:1px}
+.empty{font-size:13px;color:var(--ink3);font-style:italic;padding:10px 0}
+.network-svg{width:100%;max-width:560px;display:block;margin:0 auto}
+.network-svg text{font-family:var(--sans);fill:var(--ink)}
+@media (max-width:720px){
+  .metric-grid{grid-template-columns:repeat(2,1fr)}
+  .dist-grid{grid-template-columns:1fr}
+}
+{% endblock %}
+
+{% block content %}
+<div class="coord-head">
+  <div>
+    <div class="tag">Central server · GenNet</div>
+    <h1>Federated intelligence layer</h1>
+    <p class="lede">Orchestrates the network · does NOT store patient data · receives only Beacon-style aggregates from approved hospitals.</p>
+  </div>
+  <a href="/" class="btn btn-ghost btn-sm">← Back to network</a>
+</div>
+
+<div class="metric-grid">
+  <div class="metric">
+    <div class="metric-l">Aggregates</div>
+    <div class="metric-v" id="m-total">…</div>
+  </div>
+  <div class="metric">
+    <div class="metric-l">Hospitals</div>
+    <div class="metric-v" id="m-hosp">…</div>
+  </div>
+  <div class="metric">
+    <div class="metric-l">Unique variants</div>
+    <div class="metric-v" id="m-uniq">…</div>
+  </div>
+  <div class="metric">
+    <div class="metric-l">Last activity</div>
+    <div class="metric-v small" id="m-last">—</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h3>Top coincidences</h3>
+  <p class="panel-sub">Variants present in two or more hospitals — most clinically actionable findings.</p>
+  <div id="top-coinc"></div>
+</div>
+
+<div class="panel">
+  <h3>Network map · shared variants</h3>
+  <p class="panel-sub">Thicker lines indicate more variants shared between those two hospitals.</p>
+  <svg class="network-svg" id="net-svg" viewBox="0 0 560 280" role="img" aria-label="Network map">
+    <g id="net-edges"></g>
+    <g id="net-nodes"></g>
+  </svg>
+</div>
+
+<div class="panel">
+  <h3>Distribution</h3>
+  <div class="dist-grid">
+    <div class="dist-block">
+      <div class="dist-title">By variant (hosp · count)</div>
+      <div id="dist-variant"></div>
+    </div>
+    <div class="dist-block">
+      <div class="dist-title">By effect type</div>
+      <div id="dist-effect"></div>
+    </div>
+    <div class="dist-block">
+      <div class="dist-title">By drug response</div>
+      <div id="dist-drug"></div>
+    </div>
+  </div>
+</div>
+
+<div class="honest-note">
+  <span class="check">🛡️</span>
+  <div><b>No patient identities.</b> This page shows exactly what a doctor or researcher would receive from a Beacon endpoint — aggregate counts only. No patient records, no IDs, no demographics, no clinical notes. Hospitals retain full records on their own servers.</div>
+</div>
+
+<script>
+async function loadCoordinator(){
+  // 1) Stats
+  let stats = {};
+  try { stats = await fetch('/api/beacon/stats').then(r => r.json()); }
+  catch(e){ stats = {total_aggregates:0,hospitals_contributing:0,unique_variants:0,by_variant:[],by_effect:[],by_drug_response:[]}; }
+  // 2) Hospital list (for the map and friendly names)
+  let hospInfo = {hospitals:[]};
+  try { hospInfo = await fetch('/api/hospitals').then(r => r.json()); }
+  catch(e){}
+  // 3) Last activity
+  let last = '—';
+  try {
+    const la = await fetch('/api/beacon/last-activity').then(r => r.json());
+    if(la && la.last) last = relTime(la.last);
+    else if(la && la.empty) last = 'no activity yet';
+  } catch(e){}
+
+  // ── Metrics
+  document.getElementById('m-total').textContent = stats.total_aggregates || 0;
+  document.getElementById('m-hosp').textContent  = (stats.hospitals_contributing || 0) + ' / ' + (hospInfo.count || 0);
+  document.getElementById('m-uniq').textContent  = stats.unique_variants || 0;
+  document.getElementById('m-last').textContent  = last;
+
+  // ── Top coincidences (variants in ≥2 hospitals)
+  const top = (stats.by_variant || []).filter(v => v.hospitals >= 2);
+  const topEl = document.getElementById('top-coinc');
+  if(top.length === 0){
+    topEl.innerHTML = '<div class="empty">No variant is yet shared across two or more hospitals.</div>';
+  } else {
+    topEl.innerHTML = top.map(v =>
+      '<div class="coinc-row"><div><span class="coinc-var">'+esc(v.variant)+'</span>'+
+      '<span class="coinc-meta">in '+v.hospitals+' hospitals</span></div>'+
+      '<div class="coinc-count">'+v.count+' patient'+(v.count>1?'s':'')+'</div></div>'
+    ).join('');
+  }
+
+  // ── Distribution lists
+  fillDist('dist-variant', (stats.by_variant||[]).slice(0,8), v => ({k:v.variant, v:v.hospitals+' · '+v.count}));
+  fillDist('dist-effect',  (stats.by_effect||[]).slice(0,8),  v => ({k:v.effect,  v:v.count}));
+  fillDist('dist-drug',    (stats.by_drug_response||[]).slice(0,8), v => ({k:v.drug, v:v.count}));
+
+  // ── Network map (coordinator + hospitals, edges from shared-variants)
+  drawNetwork(hospInfo.hospitals || [], stats.by_variant || []);
+}
+
+function fillDist(id, items, mapFn){
+  const el = document.getElementById(id);
+  if(!items.length){ el.innerHTML = '<div class="empty">none yet</div>'; return; }
+  el.innerHTML = items.map(it => {
+    const r = mapFn(it);
+    return '<div class="dist-row"><span class="dist-key">'+esc(r.k)+'</span><span class="dist-val">'+esc(r.v)+'</span></div>';
+  }).join('');
+}
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function relTime(iso){
+  try {
+    const t = new Date(iso).getTime();
+    const diff = Math.round((Date.now() - t)/1000);
+    if(diff < 60) return diff+' s ago';
+    if(diff < 3600) return Math.round(diff/60)+' min ago';
+    if(diff < 86400) return Math.round(diff/3600)+' h ago';
+    return Math.round(diff/86400)+' d ago';
+  } catch(e){ return '—'; }
+}
+
+function drawNetwork(hospitals, byVariant){
+  // SVG box: 560 x 280. Coordinator at top center, hospitals along an arc below.
+  const svg = document.getElementById('net-svg');
+  const nodes = document.getElementById('net-nodes');
+  const edges = document.getElementById('net-edges');
+  nodes.innerHTML = ''; edges.innerHTML = '';
+
+  const cx = 280, cy = 60, R = 32;
+  const n = hospitals.length;
+  if(n === 0){
+    nodes.insertAdjacentHTML('beforeend',
+      '<g><circle cx="'+cx+'" cy="'+cy+'" r="'+R+'" fill="#0f7a5a" stroke="#0a5a42" stroke-width="0.5"/>'+
+      '<text x="'+cx+'" y="'+(cy-2)+'" text-anchor="middle" font-size="11" font-weight="600" fill="#fff">GenNet</text>'+
+      '<text x="'+cx+'" y="'+(cy+12)+'" text-anchor="middle" font-size="9" fill="#fff" opacity="0.85">coordinator</text></g>'+
+      '<text x="'+cx+'" y="220" text-anchor="middle" font-size="12" fill="#8a8678" font-style="italic">No hospitals connected yet.</text>'
+    );
+    return;
+  }
+
+  // Hospital positions on a line at y=210, evenly spaced
+  const startX = 80, endX = 480;
+  const positions = [];
+  for(let i=0;i<n;i++){
+    const x = n===1 ? cx : startX + (endX-startX) * (i/(n-1));
+    positions.push({x, y: 210, h: hospitals[i]});
+  }
+
+  // Build "shared variants between hospitals A and B" — only counts variants in ≥2 hosp
+  // The /api/beacon/stats endpoint only gives us per-variant hospital counts, not pairs.
+  // For the visual we'll use a proxy: if a variant is in K hospitals, every pair among
+  // those K shares 1 variant. We approximate edge weight as the number of shared variants
+  // a pair has, by querying /api/beacon/pairs (added on server).
+  let pairs = {};
+  fetch('/api/beacon/pairs').then(r => r.json()).then(d => {
+    pairs = d.pairs || {};
+    // ── Edges
+    let edgesHtml = '';
+    for(let i=0;i<n;i++){
+      for(let j=i+1;j<n;j++){
+        const a = positions[i].h.id, b = positions[j].h.id;
+        const key = a < b ? a+'|'+b : b+'|'+a;
+        const w = pairs[key] || 0;
+        const stroke = w > 0 ? '#0f7a5a' : '#ddd8ca';
+        const sw = w > 0 ? Math.min(1 + w*1.5, 6) : 1;
+        const op = w > 0 ? 0.85 : 0.4;
+        edgesHtml += '<line x1="'+positions[i].x+'" y1="'+positions[i].y+'" x2="'+positions[j].x+'" y2="'+positions[j].y+'" stroke="'+stroke+'" stroke-width="'+sw+'" opacity="'+op+'" />';
+      }
+      // Edge from coordinator to each hospital (always present)
+      edgesHtml += '<line x1="'+cx+'" y1="'+cy+'" x2="'+positions[i].x+'" y2="'+positions[i].y+'" stroke="#9FE1CB" stroke-width="1.4" opacity="0.7" />';
+    }
+    edges.innerHTML = edgesHtml;
+
+    // ── Nodes
+    let nodesHtml = '';
+    // Coordinator first (so it sits visually on top of edges)
+    nodesHtml += '<g><circle cx="'+cx+'" cy="'+cy+'" r="'+R+'" fill="#0f7a5a" stroke="#0a5a42" stroke-width="0.5"/>'+
+                 '<text x="'+cx+'" y="'+(cy-2)+'" text-anchor="middle" font-size="11" font-weight="600" fill="#fff">GenNet</text>'+
+                 '<text x="'+cx+'" y="'+(cy+12)+'" text-anchor="middle" font-size="9" fill="#fff" opacity="0.85">coordinator</text></g>';
+    positions.forEach(p => {
+      nodesHtml += '<g><circle cx="'+p.x+'" cy="'+p.y+'" r="16" fill="#e6f2ec" stroke="#0f7a5a" stroke-width="1"/>'+
+                   '<text x="'+p.x+'" y="'+(p.y+38)+'" text-anchor="middle" font-size="11">'+esc(p.h.hospital)+'</text></g>';
+    });
+    nodes.innerHTML = nodesHtml;
+  }).catch(()=>{
+    // Fallback: just draw nodes and coordinator-to-hospital edges, no shared-variant emphasis
+    let edgesHtml = '';
+    positions.forEach(p => {
+      edgesHtml += '<line x1="'+cx+'" y1="'+cy+'" x2="'+p.x+'" y2="'+p.y+'" stroke="#9FE1CB" stroke-width="1.4" opacity="0.7" />';
+    });
+    edges.innerHTML = edgesHtml;
+    let nodesHtml = '<g><circle cx="'+cx+'" cy="'+cy+'" r="'+R+'" fill="#0f7a5a" stroke="#0a5a42" stroke-width="0.5"/>'+
+                    '<text x="'+cx+'" y="'+(cy-2)+'" text-anchor="middle" font-size="11" font-weight="600" fill="#fff">GenNet</text>'+
+                    '<text x="'+cx+'" y="'+(cy+12)+'" text-anchor="middle" font-size="9" fill="#fff" opacity="0.85">coordinator</text></g>';
+    positions.forEach(p => {
+      nodesHtml += '<g><circle cx="'+p.x+'" cy="'+p.y+'" r="16" fill="#e6f2ec" stroke="#0f7a5a" stroke-width="1"/>'+
+                   '<text x="'+p.x+'" y="'+(p.y+38)+'" text-anchor="middle" font-size="11">'+esc(p.h.hospital)+'</text></g>';
+    });
+    nodes.innerHTML = nodesHtml;
+  });
+}
+
+loadCoordinator();
+</script>
+{% endblock %}
