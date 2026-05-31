@@ -1125,6 +1125,32 @@ function inferExonFromVariant(v){
   for(let i=0;i<ends.length;i++) if(pos<=ends[i]) return String(i+1);
   return null;
 }
+// Build a "variant" object from the patient's actual data (replaces the old
+// synthetic pickV()). Returns null if the patient has no cDNA variant.
+function buildVariantFromPatient(pat){
+  const cdna = pat.variantManual || (pat.descAI && pat.descAI.variant_cdna) || null;
+  if(!cdna) return null;
+  const effect = inferEffectFromVariant(cdna) || 'unknown';
+  const codon  = inferCodonFromVariant(cdna);
+  const domain = inferProteinDomain(cdna);
+  const exon   = inferExonFromVariant(cdna);
+  const prot   = (pat.descAI && pat.descAI.variant_protein)
+                 || (codon ? 'p.codon ' + codon : 'p.?');
+  // Predicted impact: high for missense/nonsense/frameshift/splice; medium otherwise
+  const highImpact = ['missense','nonsense','frameshift','splice'].includes(effect);
+  const impact = highImpact ? 'high' : (effect === 'utr_variant' ? 'low' : 'medium');
+  return {
+    cdna:   cdna,
+    prot:   prot,
+    type:   effect,
+    impact: impact,
+    cls:    'Uncertain significance',  // honest default — no ACMG in this demo
+    codon:  codon,
+    domain: domain,
+    exon:   exon,
+  };
+}
+
 function inferEffectFromDrug(p){
   if(p.descAI && p.descAI.tipo_crisis){
     const t = (p.descAI.tipo_crisis||'').toLowerCase();
@@ -1281,7 +1307,16 @@ async function startA(hid,patId){
   aRunning=true;
   const h=HH.find(h=>h.id===hid);
   const pat=gp(hid).find(p=>p.id===patId);
-  const variant=pickV(hid,pat);
+
+  // Build the variant from the patient's REAL data (replaces synthetic pickV)
+  const variant = buildVariantFromPatient(pat);
+  if(!variant){
+    aRunning = false;
+    alert('Cannot analyze this patient — no cDNA variant on record.\n\n'
+        + 'Edit the patient and add the variant (e.g. c.889C>T) — it can be '
+        + 'entered manually or extracted automatically from a FASTA header.');
+    return;
+  }
 
   document.getElementById('va-overlay').style.display='block';
   document.getElementById('av-title').textContent='Análisis FASTA federado — '+patId;
@@ -1348,15 +1383,46 @@ async function startA(hid,patId){
   addM('msg-coord','COORD: received · broadcasting to '+HH.length+' nodes...');
   await delay(400);if(!aRunning)return;
 
-  // Federated query
-  const fedRes=[];
+  // Real federated query — ask the coordinator instead of using synthetic data
+  let matchData = null;
+  try {
+    const r = await fetch('/api/beacon/match', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        hospital_id:     HOSPITAL_ID,
+        variant_cdna:    variant.cdna,
+        effect_type:     variant.type,
+        codon:           variant.codon,
+        protein_domain:  variant.domain,
+        exon:            variant.exon,
+      })
+    });
+    matchData = await r.json();
+  } catch(e){
+    matchData = null;
+  }
+
+  // Build fedRes from REAL coordinator data (one row per hospital in the network)
+  const fedRes = [];
   for(const oh of HH){
-    await delay(620);if(!aRunning)return;
-    const found=V[oh.id].find(v=>v.cdna===variant.cdna);
-    const cnt=found?found.pats:0;
+    await delay(420);if(!aRunning)return;
+    let cnt = 0, found = false;
+    if(oh.id === hid){
+      // Local hospital: count my own patients with this exact variant
+      cnt = gp(hid).filter(p => {
+        const v = p.variantManual || (p.descAI && p.descAI.variant_cdna);
+        return v === variant.cdna;
+      }).length;
+      found = cnt > 0;
+    } else if(matchData && matchData.ok){
+      // Other hospitals: look in exact_variant results from the coordinator
+      const m = (matchData.exact_variant || []).find(x => x.hospital_id === oh.id);
+      if(m){ cnt = m.count; found = true; }
+    }
     if(cnt>0) addM('msg-in','COORD → '+oh.code+': '+variant.cdna+' found · '+cnt+' patient'+(cnt>1?'s':'')+(oh.id===hid?' (local node)':''));
-    else addM('msg-out','COORD → '+oh.code+': '+variant.cdna+' not registered');
-    fedRes.push({h:oh,found:!!found,cnt});
+    else      addM('msg-out','COORD → '+oh.code+': '+variant.cdna+' not registered');
+    fedRes.push({h:oh,found,cnt});
   }
 
   // Step 3 — Aggregate
@@ -1399,11 +1465,12 @@ async function startA(hid,patId){
         <div class="var-prot">${variant.prot} · ${variant.type}</div>
         <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;font-size:11px">
           <span style="color:${clsColor(variant.cls)};font-weight:600">${variant.cls}</span>
-          <span style="color:var(--ink3)">ACMG: ${variant.acmg}</span>
-          <span style="color:var(--ink3)">De novo: ${variant.de_novo?'Yes':'No'}</span>
-          <span style="color:var(--ink3)" title="Cases described in the global scientific literature (ClinVar), NOT patients of this hospital">ClinVar lit.: ${variant.pats} case${variant.pats!==1?'s':''}</span>
+          <span style="color:var(--ink3)">Predicted impact: ${variant.impact}</span>
+          ${variant.codon!=null?`<span style="color:var(--ink3)">Codon ${variant.codon}</span>`:''}
+          ${variant.domain?`<span style="color:var(--ink3)">${variant.domain}</span>`:''}
+          ${variant.exon?`<span style="color:var(--ink3)">Exon ${variant.exon}</span>`:''}
         </div>
-        <div style="font-size:11px;color:var(--ink2);margin-top:4px">Phenotype: ${variant.pheno.join(', ')}</div>
+        <div style="font-size:10px;color:var(--ink3);margin-top:6px;font-style:italic">Classification is a conservative default — not based on ACMG criteria. Inference uses UniProt P30531 boundaries (approximate).</div>
       </div>
 
       <div class="block-lbl">Federated query</div>
