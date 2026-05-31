@@ -977,9 +977,13 @@ function refreshFedOnRender(){ setTimeout(refreshFedPanorama, 80); }
 // ── BEACON AGGREGATE TO COORDINATOR ───────────────────────────
 // Sends only the SHARED fields (variant/effect/exon/phenotype/drug response).
 // Full record stays in localStorage. This is the Beacon-style aggregate.
-// SLC6A1 NM_003042.4 codon math: cDNA pos -> codon number (CDS starts at pos 1)
+// SLC6A1 NM_003042.4 codon math: cDNA pos -> codon number (CDS starts at pos 1).
+// Returns null for splice (intronic) and UTR variants — those positions are not in the CDS.
 function inferCodonFromVariant(v){
   if(!v) return null;
+  // Splice (intronic) and UTR don't have a meaningful codon
+  if(/c\.\s*[-*]\d+/i.test(v)) return null;
+  if(/c\.\s*\d+\s*[+\-]\s*\d+/i.test(v)) return null;
   const m = v.match(/c\.(\d+)/);
   if(!m) return null;
   const pos = parseInt(m[1],10);
@@ -994,31 +998,32 @@ function inferProteinDomain(v){
   // 599 aa total. 12 transmembrane domains + intracellular loops (IL) and extracellular loops (EL).
   // Coordinates aligned with UniProt P30531 (approximate, literature-based).
   const map = [
-    [1,    56,  'N-terminus (cytoplasmic)'],
-    [57,   77,  'TM1'],
-    [78,   88,  'IL1'],
-    [89,  108,  'TM2'],
-    [109, 232,  'EL1 (large extracellular loop)'],
-    [233, 254,  'TM3'],
-    [255, 271,  'IL2'],
-    [272, 290,  'TM4'],
-    [291, 302,  'EL2'],
-    [303, 322,  'TM5'],
-    [323, 345,  'IL3'],
-    [346, 366,  'TM6'],
-    [367, 390,  'EL3'],
-    [391, 411,  'TM7'],
-    [412, 426,  'IL4'],
-    [427, 446,  'TM8'],
-    [447, 478,  'EL4'],
-    [479, 497,  'TM9'],
-    [498, 510,  'IL5'],
-    [511, 530,  'TM10'],
-    [531, 545,  'EL5'],
-    [546, 565,  'TM11'],
-    [566, 575,  'IL6'],
-    [576, 596,  'TM12'],
-    [597, 599,  'C-terminus (cytoplasmic)'],
+    // UniProt P30531 (SC6A1_HUMAN, GAT-1) — verified topology
+    [1,   52,   'N-terminus (cytoplasmic)'],
+    [53,  73,   'TM1'],
+    [74,  80,   'IL1'],
+    [81,  100,  'TM2'],
+    [101, 123,  'EL1'],
+    [124, 144,  'TM3'],
+    [145, 211,  'EL2 (large extracellular loop)'],
+    [212, 230,  'TM4'],
+    [231, 238,  'IL2'],
+    [239, 256,  'TM5'],
+    [257, 291,  'IL3'],
+    [292, 309,  'TM6'],
+    [310, 320,  'EL3'],
+    [321, 342,  'TM7'],
+    [343, 374,  'IL4'],
+    [375, 394,  'TM8'],
+    [395, 421,  'EL4'],
+    [422, 440,  'TM9'],
+    [441, 456,  'IL5'],
+    [457, 477,  'TM10'],
+    [478, 497,  'EL5'],
+    [498, 517,  'TM11'],
+    [518, 535,  'IL6'],
+    [536, 554,  'TM12'],
+    [555, 599,  'C-terminus (cytoplasmic)'],
   ];
   for(const [a,b,name] of map){ if(codon>=a && codon<=b) return name; }
   return null;
@@ -1058,28 +1063,65 @@ function updateMatchCountBadge(n){
   else { btn.style.display = 'none'; }
 }
 
-// Best-effort inference from cDNA notation (c.NNNN<X>>Y or c.NNNN_NNNN<del/ins/dup>)
+// Best-effort inference from cDNA notation. Handles SNVs, frameshift vs in-frame
+// del/dup, splice (intronic +/-), and UTR (5'/3') correctly.
 function inferEffectFromVariant(v){
   if(!v) return null;
   v = v.trim();
-  if(/del|fs|frameshift/i.test(v)) return 'frameshift';
+  // UTR: positions like c.-10C>T (5'UTR) or c.*30G>A (3'UTR)
+  if(/c\.\s*[-*]\d+/i.test(v)) return 'utr_variant';
+  // Splice: intronic notation c.NNN+M or c.NNN-M (M > 0)
+  if(/c\.\s*\d+\s*[+\-]\s*\d+/i.test(v)) return 'splice';
+  // Explicit frameshift marker
+  if(/fs|frameshift/i.test(v)) return 'frameshift';
+  // Deletion: distinguish in-frame (length multiple of 3) from frameshift
+  if(/del/i.test(v)){
+    // Range deletion c.N_Mdel — check length
+    const m = v.match(/c\.\s*(\d+)\s*_\s*(\d+)\s*del/i);
+    if(m){
+      const len = parseInt(m[2],10) - parseInt(m[1],10) + 1;
+      return (len > 0 && len % 3 === 0) ? 'deletion_inframe' : 'frameshift';
+    }
+    // Single-base deletion c.Ndel → always frameshift
+    if(/c\.\s*\d+\s*del/i.test(v)) return 'frameshift';
+    return 'frameshift';
+  }
+  // Duplication: distinguish in-frame (length multiple of 3) from frameshift
+  if(/dup/i.test(v)){
+    const m = v.match(/c\.\s*(\d+)\s*_\s*(\d+)\s*dup/i);
+    if(m){
+      const len = parseInt(m[2],10) - parseInt(m[1],10) + 1;
+      return (len > 0 && len % 3 === 0) ? 'duplication' : 'frameshift';
+    }
+    return 'duplication';
+  }
+  // Insertion: usually frameshift unless explicitly inframe (rare in HGVS)
+  if(/ins/i.test(v)) return 'insertion';
+  // SNV (substitution)
   if(/>/.test(v)){
-    // simple SNV: try to guess stop codons (we cannot truly know without protein, so default to missense)
     if(/Ter|\*|X/i.test(v)) return 'nonsense';
     return 'missense';
   }
-  if(/dup/i.test(v)) return 'duplication';
-  if(/ins/i.test(v)) return 'insertion';
   return null;
 }
-// SLC6A1 NM_003042.4 exon boundaries (cDNA positions): approximate mapping
+// SLC6A1 NM_003042.4 exon boundaries (cDNA positions): approximate mapping.
+// Returns null for UTR. For splice variants returns the adjacent exon number
+// with a "-intron" suffix to flag the intronic location explicitly.
 function inferExonFromVariant(v){
   if(!v) return null;
+  // UTR: outside the standard exon numbering
+  if(/c\.\s*[-*]\d+/i.test(v)) return null;
+  const ends = [83,196,320,446,517,653,798,892,1037,1149,1271,1418,1554,1697,1791,1848];
+  // Splice: intronic — locate adjacent exon and flag it
+  const ms = v.match(/c\.\s*(\d+)\s*([+\-])\s*(\d+)/i);
+  if(ms){
+    const pos = parseInt(ms[1],10);
+    for(let i=0;i<ends.length;i++) if(pos<=ends[i]) return String(i+1) + '-intron';
+    return null;
+  }
   const m = v.match(/c\.(\d+)/);
   if(!m) return null;
   const pos = parseInt(m[1],10);
-  // SLC6A1 exon boundaries (cDNA pos for end of each exon, exons 1–16)
-  const ends = [83,196,320,446,517,653,798,892,1037,1149,1271,1418,1554,1697,1791,1848];
   for(let i=0;i<ends.length;i++) if(pos<=ends[i]) return String(i+1);
   return null;
 }
